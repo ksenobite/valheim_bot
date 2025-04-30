@@ -50,5 +50,5 @@ Or build with build.bat via Nuitka.
 ## 🎭 The authors
 
 - Development: @ksn
-- Architecture & assembly: ChatGPT
 - Mastermind: @Gurney
+- Architecture & assembly: ChatGPT
