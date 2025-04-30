@@ -35,7 +35,7 @@ Or build with build.bat via Nuitka.
 
 ## Project Structure
 
-<pre lang="markdown"> <code> ``` valheim_bot/ ├── src/ │ ├── main.py │ ├── db.py │ └── killstreaks.py ├── sounds/ ├── .env ├── frags.db ├── opus.dll ├── build.bat ├── README.md └── CHANGELOG.md ``` </code> </pre>
+``` valheim_bot/ ├── src/ │ ├── main.py │ ├── db.py │ └── killstreaks.py ├── sounds/ ├── .env ├── frags.db ├── opus.dll ├── build.bat ├── README.md └── CHANGELOG.md ```
 
 ## The authors
 
