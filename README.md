@@ -14,13 +14,16 @@ Attention! The bot only works in conjunction with the Valheim PvP Tweaks by Tris
 
 ## Setup Instructions
 
-1. Copy `.env.example` → `.env` and set your `DISCORD_TOKEN`.
+1. Create `.env` and set your `DISCORD_TOKEN=your_token`.
 2. Place your sound files in `sounds/` (WAV PCM, 48000 Hz, stereo).
-3. Run with:
-
-```bash
-python main.py
-```
+3. Install the dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. Run with:
+    ```bash
+    python main.py
+    ```
 
 Or build with build.bat via Nuitka.
 
@@ -32,15 +35,9 @@ Or build with build.bat via Nuitka.
 
 ## Project Structure
 
-valheim_bot/
-├── src/
-│   ├── main.py
-│   ├── db.py
-│   └── killstreaks.py
-├── sounds/
-├── .env
-├── frags.db
-├── opus.dll
-├── build.bat
-├── README.md
-└── CHANGELOG.md
+<pre lang="markdown"> <code> ``` valheim_bot/ ├── src/ │ ├── main.py │ ├── db.py │ └── killstreaks.py ├── sounds/ ├── .env ├── frags.db ├── opus.dll ├── build.bat ├── README.md └── CHANGELOG.md ``` </code> </pre>
+
+## The authors
+
+Development: @ksn
+Help with architecture and assembly: ChatGPT
