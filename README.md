@@ -33,11 +33,22 @@ Or build with build.bat via Nuitka.
 - Nuitka
 - opus.dll in project root
 
-## Project Structure
+## 📁 Project structure
 
-``` valheim_bot/ ├── src/ │ ├── main.py │ ├── db.py │ └── killstreaks.py ├── sounds/ ├── .env ├── frags.db ├── opus.dll ├── build.bat ├── README.md └── CHANGELOG.md ```
+- `bot/` — sources:
+  - `main.py ` — main file of the bot
+  - `db.py ` — working with the database
+  - `killstreaks.py ` — sound effects ans messages
+- `sounds/` — WAV files of frags sounds
+- `.env` — token and environment variables (in .gitignore)
+- `frags.db` — SQLite database (in .gitignore)
+- `opus.dll ` — Opus library for playback
+- `build.bat` — build script via Nuitka
+- `README.md ` — project description
+- `CHANGELOG.md ` — change log
 
-## The authors
+## 🎭 The authors
 
 Development: @ksn
-Help with architecture and assembly: ChatGPT
+Architecture & assembly: ChatGPT
+Mastermind: @Gurney
