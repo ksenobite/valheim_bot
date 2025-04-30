@@ -1,0 +1,28 @@
+IDEAS:
+
+* принимать сообщения ТОЛЬКО от бота KillFeed (как отлаживать?)
+* выводить статистику одним сообщенем (объединить)
+* ачивки
+	- первый кил на арене
+	- автогенерачия клипчиков с дабл трипл рампагами
+* ХАРОН! делать ставки!
+
+* решить проблему с именами юзеров. переименование, регистр
+
+
+* после сборки проекта в исполняемый файл main.exe при попытке пригласить бота в голосовой канал возникает ошибка:
+2025-04-28 19:22:59 | E | Ignoring exception in command 'joinvoice'
+Traceback (most recent call last):
+  File "discord\app_commands\commands.py", line 858, in _do_call
+  File "main.py", line 137, in joinvoice
+  File "discord\abc.py", line 1984, in connect
+  File "discord\voice_client.py", line 220, in __init__
+RuntimeError: PyNaCl library needed in order to use voice
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "discord\app_commands\tree.py", line 1310, in _call
+  File "discord\app_commands\commands.py", line 883, in _invoke_with_namespace
+  File "discord\app_commands\commands.py", line 876, in _do_call
+discord.app_commands.errors.CommandInvokeError: Command 'joinvoice' raised an exception: RuntimeError: PyNaCl library needed in order to use voice
