@@ -25,7 +25,7 @@ Attention! The bot only works in conjunction with the Valheim PvP Tweaks by Tris
     python main.py
     ```
 
-Or build with build.bat via Nuitka.
+Or build with `build.bat` via Nuitka.
 
 ## 🔧 Build Requirements
 
