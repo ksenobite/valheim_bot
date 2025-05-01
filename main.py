@@ -1,31 +1,30 @@
 # -*- coding: utf-8 -*-
 
-import subprocess
-
 import os
 import sys
 import logging
-from dotenv import load_dotenv
 import sqlite3
-
+import subprocess
+import asyncio
 import discord
+
+from dotenv import load_dotenv
 from discord.ext import commands
 from discord import app_commands, Interaction
-
 from datetime import datetime, timedelta
 from operator import itemgetter
+from db import *
+from killstreaks import *
+
 
 try:
     import nacl
 except ImportError:
     logging.error("❌ PyNaCl is not installed. Voice will NOT be supported.")
 
-from db import *
-from killstreaks import *
-
 #  --- Consts ---
 
-BOT_VERSION = "4.0.0"
+BOT_VERSION = "4.1.0"
 BACKUP_DIR = 'db_backups'
 killstreaks = {}
 
@@ -38,15 +37,18 @@ async def check_positive(interaction: discord.Interaction, **kwargs):
             return False
     return True
 
+
 async def require_admin(interaction: discord.Interaction) -> bool:
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("Admin only", ephemeral=True)
         return False
     return True
 
+
 def get_current_killstreak_timeout():
     val = get_setting("killstreak_timeout")
     return int(val) if val else 15
+
 
 def get_base_dir():
     return os.path.dirname(os.path.abspath(sys.argv[0]))
@@ -123,6 +125,7 @@ async def on_ready():
     if get_announce_channel_id() is None:
         logging.warning("⚠️ Announce channel is not set.")
 
+
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
@@ -152,6 +155,7 @@ async def on_message(message):
                 del killstreaks[victim]
             add_frag(killer, victim)
 
+
 @bot.event
 async def on_app_command_completion(interaction: discord.Interaction, command: app_commands.Command):
     user = interaction.user
@@ -178,6 +182,8 @@ async def joinvoice(interaction: discord.Interaction, leave: bool = False):
         channel = interaction.user.voice.channel
         await channel.connect()
         await interaction.response.send_message(f"Connected to {channel.name}", ephemeral=True)
+        asyncio.create_task(start_heartbeat_loop(bot, interaction.guild))
+
 
 @bot.tree.command(name="stats", description="Show player stats")
 @app_commands.describe(player="Player", days="Days", public="Show publicly?")
@@ -218,6 +224,7 @@ async def stats(interaction: discord.Interaction, player: str, days: int = 1, pu
     await interaction.response.send_message(embed=embed, ephemeral=not public)
     await interaction.followup.send(content=f"```{summary}```", ephemeral=not public)
 
+
 @bot.tree.command(name="top", description="Top players by frags")
 @app_commands.describe(count="Number of top players", days="Days", public="Show publicly?")
 async def top(interaction: Interaction, count: int = 5, days: int = 1, public: bool = False):
@@ -234,6 +241,7 @@ async def top(interaction: Interaction, count: int = 5, days: int = 1, public: b
     for i, (player, score) in enumerate(top_stats, 1):
         embed.add_field(name="\u200b", value=f"{i}. {player}:   {score}", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=not public)
+
 
 @bot.tree.command(name="announcestyle", description="Show or set the killstreak announce style")
 @app_commands.describe(style="Style name (classic, epic, tournament)")
@@ -255,6 +263,7 @@ async def announcestyle(interaction: Interaction, style: str = None):
         current_style = get_announce_style()
         await interaction.response.send_message(f"Current announce style is **{current_style}**.", ephemeral=True)
 
+
 @bot.tree.command(name="killstreaktimeout", description="Show or set the killstreak timeout (in seconds)")
 @app_commands.describe(seconds="New timeout value in seconds")
 async def killstreaktimeout(interaction: Interaction, seconds: int = None):
@@ -275,6 +284,7 @@ async def killstreaktimeout(interaction: Interaction, seconds: int = None):
         else:
             await interaction.response.send_message("Killstreak timeout is not set. Default: 15 seconds.", ephemeral=True)
 
+
 @bot.tree.command(name="announce", description="Show or set the announce channel")
 @app_commands.describe(channel="Channel")
 async def announce(interaction: Interaction, channel: discord.TextChannel = None):
@@ -294,6 +304,7 @@ async def announce(interaction: Interaction, channel: discord.TextChannel = None
         else:
             await interaction.response.send_message("Announce channel is not set.", ephemeral=True)
 
+
 @bot.tree.command(name="tracking", description="Show or set the tracking channel")
 @app_commands.describe(channel="Channel")
 async def tracking(interaction: Interaction, channel: discord.TextChannel = None):
@@ -312,6 +323,7 @@ async def tracking(interaction: Interaction, channel: discord.TextChannel = None
                 await interaction.response.send_message("Tracking channel not found.", ephemeral=True)
         else:
             await interaction.response.send_message("Tracking channel is not set.", ephemeral=True)
+
 
 @bot.tree.command(name="reset", description="Reset the database or restore from backup")
 @app_commands.describe(backup="Name of the backup file to restore (optional)")
@@ -351,6 +363,7 @@ async def reset(interaction: Interaction, backup: str = None):
             ephemeral=True
         )
         logging.info(f"Database restored from backup {backup}.")
+
 
 @bot.tree.command(name="helpme", description="Show list of available commands")
 async def helpme(interaction: discord.Interaction):

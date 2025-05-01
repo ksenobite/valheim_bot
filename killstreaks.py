@@ -1,22 +1,16 @@
 # -*- coding: utf-8 -*-
-import discord
+
 import os
+import asyncio
 import wave
+import discord
 import logging
 from db import get_announce_channel_id, get_announce_style
 
-# # 🧠 Загружаем opus.dll, если он ещё не загружен
-# if not discord.opus.is_loaded():
-#     discord.opus.load_opus("opus.dll")
 
 SOUNDS_DIR = None
 
-def set_sounds_path(path):
-    global SOUNDS_DIR
-    SOUNDS_DIR = path
-    logging.info(f"🎵 Using sounds from: {SOUNDS_DIR}")
-
-# 🎶 Стили фрагов
+# 🎶 Frags Styles
 KILLSTREAK_STYLES = {
     "classic": {
         2: {"title": "⚡ DOUBLE KILL", "emojis": "⚔️⚔️"},
@@ -38,6 +32,44 @@ KILLSTREAK_STYLES = {
     }
 }
 
+
+class SimpleAudioSource(discord.AudioSource):
+    def __init__(self, file_path):
+        self.wave = wave.open(file_path, 'rb')
+        self.frame_bytes = int(self.wave.getframerate() / 50) * self.wave.getnchannels() * self.wave.getsampwidth()
+
+    def read(self):
+        return self.wave.readframes(self.frame_bytes // (self.wave.getnchannels() * self.wave.getsampwidth()))
+
+    def is_opus(self):
+        return False
+
+    def cleanup(self):
+        self.wave.close()
+
+
+# 📦 Custom PCM audio source from WAV
+class KillstreakAudioSource(discord.AudioSource):
+    def __init__(self, file_path):
+        self.wave = wave.open(file_path, 'rb')
+        self.frame_bytes = int(self.wave.getframerate() / 50) * self.wave.getnchannels() * self.wave.getsampwidth()
+
+    def read(self):
+        return self.wave.readframes(self.frame_bytes // (self.wave.getnchannels() * self.wave.getsampwidth()))
+
+    def is_opus(self):
+        return False
+
+    def cleanup(self):
+        self.wave.close()
+
+
+def set_sounds_path(path):
+    global SOUNDS_DIR
+    SOUNDS_DIR = path
+    logging.info(f"🎵 Using sounds from: {SOUNDS_DIR}")
+
+
 async def send_killstreak_announcement(bot, killer: str, count: int):
     announce_channel_id = get_announce_channel_id()
     if not announce_channel_id:
@@ -54,20 +86,6 @@ async def send_killstreak_announcement(bot, killer: str, count: int):
     if data:
         await channel.send(f"{data['title']} by {killer}! {data['emojis']}")
 
-# 📦 Пользовательский источник PCM-звука из WAV
-class KillstreakAudioSource(discord.AudioSource):
-    def __init__(self, file_path):
-        self.wave = wave.open(file_path, 'rb')
-        self.frame_bytes = int(self.wave.getframerate() / 50) * self.wave.getnchannels() * self.wave.getsampwidth()
-
-    def read(self):
-        return self.wave.readframes(self.frame_bytes // (self.wave.getnchannels() * self.wave.getsampwidth()))
-
-    def is_opus(self):
-        return False
-
-    def cleanup(self):
-        self.wave.close()
 
 async def play_killstreak_sound(bot, count: int, guild: discord.Guild):
     if not SOUNDS_DIR:
@@ -103,3 +121,17 @@ async def play_killstreak_sound(bot, count: int, guild: discord.Guild):
     except Exception as e:
         logging.error("💥 Playback exception:")
         logging.exception(e)
+
+
+async def start_heartbeat_loop(bot, guild):
+    silent_path = os.path.join(SOUNDS_DIR, "silent.wav")
+    while True:
+        await asyncio.sleep(60)  # Every minute
+        voice_client = discord.utils.get(bot.voice_clients, guild=guild)
+        if voice_client and not voice_client.is_playing():
+            try:
+                source = SimpleAudioSource(silent_path)
+                voice_client.play(source)
+                logging.debug("💤 Heartbeat: silent.wav played.")
+            except Exception as e:
+                logging.warning(f"⚠️ Heartbeat failed: {e}")

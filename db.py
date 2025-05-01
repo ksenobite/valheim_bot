@@ -11,8 +11,10 @@ def set_db_path(path):
     DB_FILE = path
     logging.info(f"📁 Using database at: {DB_FILE}")
 
+
 def get_db_path():
     return DB_FILE
+
 
 def init_db():
     if not DB_FILE:
@@ -36,12 +38,14 @@ def init_db():
         """)
         conn.commit()
 
+
 def get_setting(key):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("SELECT value FROM settings WHERE key = ?", (key,))
         row = c.fetchone()
         return row[0] if row else None
+
 
 def set_setting(key, value):
     with sqlite3.connect(DB_FILE) as conn:
@@ -50,15 +54,18 @@ def set_setting(key, value):
         conn.commit()
 
 # --- Announce ---
+
 def get_tracking_channel_id():
     val = get_setting("tracking_channel_id")
     logging.info(f"Tracking channel loaded from DB: {val}")
     return int(val) if val else None
 
+
 def get_announce_channel_id():
     val = get_setting("announce_channel_id")
     logging.info(f"Announce channel loaded from DB: {val}")
     return int(val) if val else None
+
 
 def get_announce_style():
     val = get_setting("announce_style")
@@ -68,6 +75,7 @@ def set_announce_style(style_name):
     set_setting("announce_style", style_name)
 
 # --- Stats ---
+
 def add_frag(killer, victim):
     now = datetime.utcnow()
     with sqlite3.connect(DB_FILE) as conn:
@@ -75,6 +83,7 @@ def add_frag(killer, victim):
         c.execute("INSERT INTO frags (killer, victim, timestamp) VALUES (?, ?, ?)", (killer, victim, now))
         conn.commit()
     logging.info(f"{killer} killed {victim} at {now}")
+
 
 def get_top_players(n=5, days=1):
     with sqlite3.connect(DB_FILE) as conn:
