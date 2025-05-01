@@ -35,10 +35,9 @@ Or build with `build.bat` via Nuitka.
 
 ## 📁 Project structure
 
-- `bot/` — sources:
-  - `main.py ` — main file of the bot
-  - `db.py ` — working with the database
-  - `killstreaks.py ` — sound effects ans messages
+- `main.py ` — main file of the bot
+- `db.py ` — working with the database
+- `killstreaks.py ` — sound effects ans messages
 - `sounds/` — WAV files of frags sounds
 - `.env` — token and environment variables (in .gitignore)
 - `frags.db` — SQLite database (in .gitignore)
