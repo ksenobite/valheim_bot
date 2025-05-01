@@ -91,7 +91,7 @@ else:
 
 # Load token
 TOKEN = os.getenv("DISCORD_TOKEN")
-if not TOKEN:
+if not TOKEN or TOKEN == None:
     logging.error("❌ DISCORD_TOKEN is missing from .env.")
     sys.exit(1)
 

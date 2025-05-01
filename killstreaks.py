@@ -33,6 +33,8 @@ KILLSTREAK_STYLES = {
 }
 
 
+# 📦 Custom PCM audio source from WAV
+
 class SimpleAudioSource(discord.AudioSource):
     def __init__(self, file_path):
         self.wave = wave.open(file_path, 'rb')
@@ -46,23 +48,6 @@ class SimpleAudioSource(discord.AudioSource):
 
     def cleanup(self):
         self.wave.close()
-
-
-# 📦 Custom PCM audio source from WAV
-class KillstreakAudioSource(discord.AudioSource):
-    def __init__(self, file_path):
-        self.wave = wave.open(file_path, 'rb')
-        self.frame_bytes = int(self.wave.getframerate() / 50) * self.wave.getnchannels() * self.wave.getsampwidth()
-
-    def read(self):
-        return self.wave.readframes(self.frame_bytes // (self.wave.getnchannels() * self.wave.getsampwidth()))
-
-    def is_opus(self):
-        return False
-
-    def cleanup(self):
-        self.wave.close()
-
 
 def set_sounds_path(path):
     global SOUNDS_DIR
@@ -116,11 +101,10 @@ async def play_killstreak_sound(bot, count: int, guild: discord.Guild):
 
     try:
         logging.info(f"🔊 Playing sound: {sound_file}")
-        source = KillstreakAudioSource(sound_file)
+        source = SimpleAudioSource(sound_file)
         voice_client.play(source, after=lambda e: logging.info(f"✅ Playback complete. Error: {e}" if e else "✅ Sound finished."))
     except Exception as e:
-        logging.error("💥 Playback exception:")
-        logging.exception(e)
+        logging.exception("💥 Playback failed")
 
 
 async def start_heartbeat_loop(bot, guild):
@@ -135,3 +119,4 @@ async def start_heartbeat_loop(bot, guild):
                 logging.debug("💤 Heartbeat: silent.wav played.")
             except Exception as e:
                 logging.warning(f"⚠️ Heartbeat failed: {e}")
+                await asyncio.sleep(10)  # Prevent spamming in case of repeated failure
