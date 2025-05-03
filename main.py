@@ -18,6 +18,9 @@ from db import *
 from killstreaks import *
 
 
+BOT_VERSION = "4.3.0"
+
+
 try:
     import nacl
 except ImportError:
@@ -25,7 +28,6 @@ except ImportError:
 
 #  --- Consts ---
 
-BOT_VERSION = "4.2.0"
 BACKUP_DIR = 'db_backups'
 killstreaks = {}
 
@@ -34,7 +36,7 @@ killstreaks = {}
 async def check_positive(interaction: discord.Interaction, **kwargs):
     for name, value in kwargs.items():
         if value < 1:
-            await interaction.response.send_message(f"The parameter '{name}' must be greater than 0.", ephemeral=True)
+            await interaction.response.send_message(f"❗ The parameter '{name}' must be greater than 0.", ephemeral=True)
             return False
     return True
 
@@ -65,7 +67,6 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-logging.info(f"🤖 Bot started. Version: {BOT_VERSION}")
 
 #  --- Settings --- 
 
@@ -105,7 +106,7 @@ if not os.path.isdir(sounds_path ):
 class FragBot(commands.Bot):
     async def setup_hook(self):
         await self.tree.sync()
-        logging.info("Slash commands synced.")
+        logging.info("✅ Slash commands synced")
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -119,12 +120,17 @@ KILLSTREAK_TIMEOUT = get_current_killstreak_timeout()
 @bot.event
 async def on_ready():
     user = bot.user
-    logging.info(f"🤖 Bot is ready! Logged in as {user} (ID: {user.id})")
+    logging.info(f"🤖 Bot(v.{BOT_VERSION}) is ready! Logged in as {user} (ID: {user.id})")
 
     if get_tracking_channel_id() is None:
         logging.warning("⚠️ Tracking channel is not set.")
+    else:
+        logging.info(f"✅ Tracking channel loaded")
+        
     if get_announce_channel_id() is None:
         logging.warning("⚠️ Announce channel is not set.")
+    else:
+        logging.info(f"✅ Announce channel loaded")
 
 
 @bot.event
@@ -133,17 +139,13 @@ async def on_message(message):
         return
     channel_id = get_tracking_channel_id()
     if channel_id and message.channel.id == channel_id:
-        parts = message.content.split(" killed by ")
-        if len(parts) == 2:
-            victim = parts[0].strip()
-            killer = parts[1].strip()
-
+        match = re.match(r"^(.+) killed by (.+)$", message.content.strip())
+        if match:
+            victim, killer = match.groups()
             # the statistics will also be consistent
             killer = killer.lower()
             victim = victim.lower()
-
             now = datetime.utcnow()
-
             if killer not in killstreaks:
                 killstreaks[killer] = {"count": 1, "last_kill_time": now}
             else:
@@ -152,14 +154,17 @@ async def on_message(message):
                     killstreaks[killer]["count"] += 1
                 else:
                     killstreaks[killer]["count"] = 1
+
                 killstreaks[killer]["last_kill_time"] = now
             if killstreaks[killer]["count"] >= 2:
                 await send_killstreak_announcement(bot, killer, killstreaks[killer]["count"])
                 await play_killstreak_sound(bot, killstreaks[killer]["count"], message.guild)
-
             if victim in killstreaks:
                 del killstreaks[victim]
             add_frag(killer, victim)
+        else:
+            logging.warning(f"⚠️  Unknown message: {message.content}")
+            return
 
 
 @bot.event
@@ -183,7 +188,7 @@ async def joinvoice(interaction: discord.Interaction, leave: bool = False):
             await interaction.response.send_message("I'm not connected to a voice channel.", ephemeral=True)
     else:
         if interaction.user.voice is None:
-            await interaction.response.send_message("You must be in a voice channel.", ephemeral=True)
+            await interaction.response.send_message("⚠️ You must be in a voice channel.", ephemeral=True)
             return
         channel = interaction.user.voice.channel
         await channel.connect()
@@ -230,6 +235,15 @@ async def mystats(interaction: Interaction, days: int = 1, public: bool = False)
     await show_stats_for_characters(interaction, characters, days, public)
 
 
+def get_winrate_emoji(winrate: float) -> str:
+    if winrate > 60:
+        return "🟢"
+    elif winrate >= 40:
+        return "🟡"
+    else:
+        return "🔴"
+
+
 async def show_stats_for_characters(interaction, characters: list[str], days: int, public: bool):
     since = datetime.utcnow() - timedelta(days=days)
     with sqlite3.connect(get_db_path()) as conn:
@@ -237,16 +251,25 @@ async def show_stats_for_characters(interaction, characters: list[str], days: in
         victories = {}
         defeats = {}
 
-        characters = [c.lower() for c in characters]
+        characters = [name.lower() for name in characters]
         for character in characters:
-            c.execute("SELECT victim, COUNT(*) FROM frags WHERE killer = ? AND timestamp >= ? GROUP BY victim", (character, since))
-            for row in c.fetchall():
-                victories[row[0]] = victories.get(row[0], 0) + row[1]
+            c.execute("""
+                SELECT victim, COUNT(*) FROM frags
+                WHERE killer = ? AND timestamp >= ?
+                GROUP BY victim
+            """, (character, since))
+            for victim, count in c.fetchall():
+                victories[victim] = victories.get(victim, 0) + count
 
-            c.execute("SELECT killer, COUNT(*) FROM frags WHERE victim = ? AND timestamp >= ? GROUP BY killer", (character, since))
-            for row in c.fetchall():
-                defeats[row[0]] = defeats.get(row[0], 0) + row[1]
+            c.execute("""
+                SELECT killer, COUNT(*) FROM frags
+                WHERE victim = ? AND timestamp >= ?
+                GROUP BY killer
+            """, (character, since))
+            for killer, count in c.fetchall():
+                defeats[killer] = defeats.get(killer, 0) + count
 
+    # 📊 Statistics processing
     all_opponents = set(victories) | set(defeats)
     stats = []
     for opponent in all_opponents:
@@ -261,17 +284,33 @@ async def show_stats_for_characters(interaction, characters: list[str], days: in
     total_matches = total_wins + total_losses
     overall_winrate = (total_wins / total_matches) * 100 if total_matches else 0
 
-    embed = discord.Embed(title=f"📊 Combined stats for {len(characters)} character(s) in {days} day(s)")
+    # 📦 Embed Formation
+    embed = discord.Embed(
+        title=f"📊 Combined stats for {len(characters)} character(s) in {days} day(s)",
+        color=discord.Color.blue()
+    )
+
     for opponent, wins, losses, winrate in sorted(stats, key=itemgetter(3), reverse=True):
+        emoji = get_winrate_emoji(winrate)
         embed.add_field(
-            name=opponent,
+            name=f"{emoji} {opponent.upper()}",
             value=f"Wins: {wins} | Losses: {losses} | Winrate: {winrate:.1f}%",
             inline=False
         )
 
-    summary = f"Total wins: {total_wins}\nTotal losses: {total_losses}\nOverall Winrate: {overall_winrate:.1f}%"
+    # 📢 General summary — bold and bottom
+    emoji_summary = get_winrate_emoji(overall_winrate)
+    embed.add_field(
+        name="**__Overall Performance Summary__**",
+        value=(
+            f"**Total Wins:** {total_wins}  \n"
+            f"**Total Losses:** {total_losses}  \n"
+            f"**Overall Winrate:** {emoji_summary} **{overall_winrate:.1f}%**"
+        ),
+        inline=False
+    )
+
     await interaction.response.send_message(embed=embed, ephemeral=not public)
-    await interaction.followup.send(content=f"```{summary}```", ephemeral=not public)
 
 
 @bot.tree.command(name="top", description="Top players by frags")
@@ -280,11 +319,11 @@ async def top(interaction: Interaction, count: int = 5, days: int = 1, public: b
     if not await check_positive(interaction, count=count, days=days):
         return
     if public and not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("Admin only", ephemeral=True)
+        await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
         return
     top_stats = get_top_players(count, days)
     if not top_stats:
-        await interaction.response.send_message(f"No data for last {days} day(s).", ephemeral=not public)
+        await interaction.response.send_message(f"❌ No data for last {days} day(s).", ephemeral=not public)
         return
     embed = discord.Embed(title=f"Top {count} players in the last {days} day(s)")
     for i, (player, score) in enumerate(top_stats, 1):
@@ -307,10 +346,10 @@ async def announcestyle(interaction: Interaction, style: str = None):
             )
             return
         set_announce_style(style)
-        await interaction.response.send_message(f"Announce style set to **{style}**.", ephemeral=True)
+        await interaction.response.send_message(f"✅ Announce style set to **{style}**.", ephemeral=True)
     else:
         current_style = get_announce_style()
-        await interaction.response.send_message(f"Current announce style is **{current_style}**.", ephemeral=True)
+        await interaction.response.send_message(f"✅ Current announce style is **{current_style}**.", ephemeral=True)
 
 
 @bot.tree.command(name="killstreaktimeout", description="Show or set the killstreak timeout (in seconds)")
@@ -321,17 +360,17 @@ async def killstreaktimeout(interaction: Interaction, seconds: int = None):
     global KILLSTREAK_TIMEOUT
     if seconds is not None:
         if seconds < 1:
-            await interaction.response.send_message("Timeout must be greater than 0.", ephemeral=True)
+            await interaction.response.send_message("❗ Timeout must be greater than 0.", ephemeral=True)
             return
         KILLSTREAK_TIMEOUT = seconds
         set_setting("killstreak_timeout", str(seconds))
-        await interaction.response.send_message(f"Killstreak timeout set to {seconds} seconds.", ephemeral=True)
+        await interaction.response.send_message(f"✅ Killstreak timeout set to {seconds} seconds.", ephemeral=True)
     else:
         current = get_setting("killstreak_timeout")
         if current:
-            await interaction.response.send_message(f"Current killstreak timeout: {current} seconds.", ephemeral=True)
+            await interaction.response.send_message(f"✅ Current killstreak timeout: {current} seconds.", ephemeral=True)
         else:
-            await interaction.response.send_message("Killstreak timeout is not set. Default: 15 seconds.", ephemeral=True)
+            await interaction.response.send_message("❗ Killstreak timeout is not set. Default: 15 seconds.", ephemeral=True)
 
 
 @bot.tree.command(name="announce", description="Show or set the announce channel")
@@ -341,17 +380,17 @@ async def announce(interaction: Interaction, channel: discord.TextChannel = None
         return
     if channel:
         set_setting("announce_channel_id", str(channel.id))
-        await interaction.response.send_message(f"Announce channel set to {channel.mention}.", ephemeral=True)
+        await interaction.response.send_message(f"✅ Announce channel set to {channel.mention}.", ephemeral=True)
     else:
         cid = get_announce_channel_id()
         if cid:
             chan = interaction.guild.get_channel(cid)
             if chan:
-                await interaction.response.send_message(f"Current announce channel: {chan.mention}", ephemeral=True)
+                await interaction.response.send_message(f"✅ Current announce channel: {chan.mention}", ephemeral=True)
             else:
-                await interaction.response.send_message("Announce channel not found.", ephemeral=True)
+                await interaction.response.send_message("❗ Announce channel not found.", ephemeral=True)
         else:
-            await interaction.response.send_message("Announce channel is not set.", ephemeral=True)
+            await interaction.response.send_message("⚠️ Announce channel is not set.", ephemeral=True)
 
 
 @bot.tree.command(name="tracking", description="Show or set the tracking channel")
@@ -361,17 +400,17 @@ async def tracking(interaction: Interaction, channel: discord.TextChannel = None
         return
     if channel:
         set_setting("tracking_channel_id", str(channel.id))
-        await interaction.response.send_message(f"Tracking channel set to {channel.mention}.", ephemeral=True)
+        await interaction.response.send_message(f"✅ Tracking channel set to {channel.mention}.", ephemeral=True)
     else:
         cid = get_tracking_channel_id()
         if cid:
             chan = interaction.guild.get_channel(cid)
             if chan:
-                await interaction.response.send_message(f"Current tracking channel: {chan.mention}", ephemeral=True)
+                await interaction.response.send_message(f"✅ Current tracking channel: {chan.mention}", ephemeral=True)
             else:
-                await interaction.response.send_message("Tracking channel not found.", ephemeral=True)
+                await interaction.response.send_message("❗ Tracking channel not found.", ephemeral=True)
         else:
-            await interaction.response.send_message("Tracking channel is not set.", ephemeral=True)
+            await interaction.response.send_message("⚠️ Tracking channel is not set.", ephemeral=True)
 
 
 @bot.tree.command(name="reset", description="Reset the database or restore from backup")
@@ -389,10 +428,11 @@ async def reset(interaction: Interaction, backup: str = None):
         init_db()
         await interaction.response.send_message(
             "✅ Database has been reset.\n\n"
-            "Please **set tracking channel** and **announce channel** again!",
+            f"✅ Backup saved:\n {backup_file}\n\n"
+            "❗ Please set **tracking channel** and **announce channel** again!",
             ephemeral=True
         )
-        logging.info(f"Database reset complete. Backup saved as {backup_file}.")
+        logging.info(f"✅ Database reset complete. Backup saved: {backup_file}")
     else:
         # Restore from backup
         backup_path = os.path.join(BACKUP_DIR, backup)
@@ -407,11 +447,11 @@ async def reset(interaction: Interaction, backup: str = None):
         os.replace(backup_path, get_db_path())
         init_db()
         await interaction.response.send_message(
-            "✅ Database restored from backup.\n\n"
-            "**Please restart the bot manually!**",
+            "✅ Database restored from backup\n\n"
+            "**❗ Please restart the bot manually!**",
             ephemeral=True
         )
-        logging.info(f"Database restored from backup {backup}.")
+        logging.info(f"✅ Database restored from backup {backup}")
 
 
 @bot.tree.command(name="linkcharacter", description="Link a game character to a Discord user")
@@ -485,6 +525,7 @@ async def helpme(interaction: discord.Interaction):
         ),
         inline=False
     )
+    embed.set_footer(text=f"Bot version {BOT_VERSION}")
 
     await interaction.response.send_message(embed=embed, ephemeral=True)
 

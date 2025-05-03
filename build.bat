@@ -1,7 +1,7 @@
 @echo off
 title ⚙️ Building Discord Bot with Nuitka (Standalone - WAV Support)
 echo ===============================
-echo     Building Project (v4.1.0)
+echo     Building Project
 echo ===============================
 echo.
 

@@ -7,7 +7,6 @@ import discord
 import logging
 from db import get_announce_channel_id, get_announce_style
 
-
 SOUNDS_DIR = None
 
 # 🎶 Frags Styles
@@ -32,9 +31,7 @@ KILLSTREAK_STYLES = {
     }
 }
 
-
-# 📦 Custom PCM audio source from WAV
-
+# 📦 Simple WAV audio source
 class SimpleAudioSource(discord.AudioSource):
     def __init__(self, file_path):
         self.wave = wave.open(file_path, 'rb')
@@ -49,37 +46,48 @@ class SimpleAudioSource(discord.AudioSource):
     def cleanup(self):
         self.wave.close()
 
+
 def set_sounds_path(path):
     global SOUNDS_DIR
     SOUNDS_DIR = path
-    logging.info(f"🎵 Using sounds from: {SOUNDS_DIR}")
+    if not os.path.isdir(SOUNDS_DIR):
+        logging.warning(f"❗ Sounds directory does not exist: {SOUNDS_DIR}")
+    else:
+        logging.info(f"🎵 Using sounds from: {SOUNDS_DIR}")
 
 
 async def send_killstreak_announcement(bot, killer: str, count: int):
-    announce_channel_id = get_announce_channel_id()
-    if not announce_channel_id:
-        logging.warning("Announce channel not set.")
+    channel_id = get_announce_channel_id()
+    if not channel_id:
+        logging.warning("❗ Announce channel ID not set.")
         return
 
-    channel = bot.get_channel(announce_channel_id)
+    channel = bot.get_channel(channel_id)
     if not channel:
-        logging.warning("Announce channel not found.")
+        logging.warning(f"❗ Announce channel not found (ID: {channel_id}).")
         return
 
-    style = KILLSTREAK_STYLES.get(get_announce_style(), {})
+    style_name = get_announce_style()
+    style = KILLSTREAK_STYLES.get(style_name)
+    if not style:
+        logging.warning(f"❗ Unknown announce style: {style_name}")
+        return
+
     data = style.get(count)
-    if data:
-        await channel.send(f"{data['title']} by {killer}! {data['emojis']}")
+    if not data:
+        return  # Not announcing for this kill count
+
+    try:
+        message = f"{data['title']} by {killer}! {data['emojis']}"
+        await channel.send(message)
+        logging.info(f"📣 Announcement sent: {message}")
+    except Exception as e:
+        logging.exception(f"❌ Failed to send announcement: {e}")
 
 
 async def play_killstreak_sound(bot, count: int, guild: discord.Guild):
     if not SOUNDS_DIR:
-        logging.error("SOUNDS_DIR not set.")
-        return
-
-    voice_client = discord.utils.get(bot.voice_clients, guild=guild)
-    if not voice_client:
-        logging.warning("🔇 Bot is not connected to a voice channel.")
+        logging.error("❗ SOUNDS_DIR is not set.")
         return
 
     sound_map = {
@@ -91,26 +99,41 @@ async def play_killstreak_sound(bot, count: int, guild: discord.Guild):
 
     sound_file = sound_map.get(count)
     if not sound_file or not os.path.isfile(sound_file):
-        logging.error(f"❌ Sound file not found: {sound_file}")
+        logging.warning(f"⚠️ Sound file not found: {sound_file}")
+        return
+
+    voice_client = discord.utils.get(bot.voice_clients, guild=guild)
+    if not voice_client:
+        logging.warning("🔇 Bot is not connected to a voice channel.")
         return
 
     if voice_client.is_playing():
         voice_client.stop()
-        logging.warning("⚠ Already playing sound.")
-        return
+        logging.warning("⚠️ Stopped previous sound playback.")
 
     try:
-        logging.info(f"🔊 Playing sound: {sound_file}")
         source = SimpleAudioSource(sound_file)
-        voice_client.play(source, after=lambda e: logging.info(f"✅ Playback complete. Error: {e}" if e else "✅ Sound finished."))
+        voice_client.play(
+            source,
+            after=lambda e: logging.info(f"✅ Playback complete. Error: {e}" if e else "✅ Sound finished.")
+        )
+        logging.info(f"🔊 Playing sound: {sound_file}")
     except Exception as e:
-        logging.exception("💥 Playback failed")
+        logging.exception("💥 Failed to play killstreak sound")
 
 
 async def start_heartbeat_loop(bot, guild):
+    if not SOUNDS_DIR:
+        logging.error("❗ SOUNDS_DIR is not set.")
+        return
+
     silent_path = os.path.join(SOUNDS_DIR, "silent.wav")
+    if not os.path.isfile(silent_path):
+        logging.warning("⚠️ Heartbeat sound (silent.wav) is missing.")
+        return
+
     while True:
-        await asyncio.sleep(60)  # Every minute
+        await asyncio.sleep(60)
         voice_client = discord.utils.get(bot.voice_clients, guild=guild)
         if voice_client and not voice_client.is_playing():
             try:
@@ -119,4 +142,4 @@ async def start_heartbeat_loop(bot, guild):
                 logging.debug("💤 Heartbeat: silent.wav played.")
             except Exception as e:
                 logging.warning(f"⚠️ Heartbeat failed: {e}")
-                await asyncio.sleep(10)  # Prevent spamming in case of repeated failure
+                await asyncio.sleep(10)

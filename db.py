@@ -37,7 +37,7 @@ def init_db():
                 value TEXT
             )
         """)
-        c.execute:("""
+        c.execute("""
             CREATE TABLE IF NOT EXISTS character_map (
                 character TEXT PRIMARY KEY,
                 discord_id INTEGER NOT NULL
@@ -64,15 +64,11 @@ def set_setting(key, value):
 
 def get_tracking_channel_id():
     val = get_setting("tracking_channel_id")
-    logging.info(f"💻 Tracking channel loaded from DB: {val}")
     return int(val) if val else None
-
 
 def get_announce_channel_id():
     val = get_setting("announce_channel_id")
-    logging.info(f"💻 Announce channel loaded from DB: {val}")
     return int(val) if val else None
-
 
 def get_announce_style():
     val = get_setting("announce_style")
@@ -85,11 +81,14 @@ def set_announce_style(style_name):
 
 def add_frag(killer, victim):
     now = datetime.utcnow()
-    with sqlite3.connect(DB_FILE) as conn:
-        c = conn.cursor()
-        c.execute("INSERT INTO frags (killer, victim, timestamp) VALUES (?, ?, ?)", (killer, victim, now))
-        conn.commit()
-    logging.info(f"{killer} killed {victim} at {now}")
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            c = conn.cursor()
+            c.execute("INSERT INTO frags (killer, victim, timestamp) VALUES (?, ?, ?)", (killer, victim, now))
+            conn.commit()
+        logging.info(f"⚔️  {killer} killed {victim} at {now}")
+    except sqlite3.Error as e:
+        logging.error(f"❌ Error when adding a frag: {e}")
 
 
 def get_top_players(n=5, days=1):
@@ -108,7 +107,7 @@ def get_top_players(n=5, days=1):
 # --- Linking ---
 
 def link_character(character: str, discord_id: int):
-    with sqlite3.connect(get_db_path) as conn:
+    with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
         c.execute('''
             INSERT INTO character_map (character, discord_id)
