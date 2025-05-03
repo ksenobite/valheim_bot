@@ -1,6 +1,11 @@
 #### 📄 `CHANGELOG.md`
 ```markdown
 
+## v4.2.0 — 2025-05-02
+- New admin commands (`/linkcharacter`, `/unlinkcharacter`) so that you can establish a match between the game character and the Discord user.
+- Updated user commands (`/stats`, `/mystats`) for viewing statistics.
+- /stats command now accepts both the character_name and the @discord_user.
+
 ## v4.1.0 — 2025-05-01
 - The project structure has been simplified.
 - The code was refactored.

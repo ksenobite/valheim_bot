@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import asyncio
 import discord
+import re
 
 from dotenv import load_dotenv
 from discord.ext import commands
@@ -24,7 +25,7 @@ except ImportError:
 
 #  --- Consts ---
 
-BOT_VERSION = "4.1.0"
+BOT_VERSION = "4.2.0"
 BACKUP_DIR = 'db_backups'
 killstreaks = {}
 
@@ -40,7 +41,7 @@ async def check_positive(interaction: discord.Interaction, **kwargs):
 
 async def require_admin(interaction: discord.Interaction) -> bool:
     if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("Admin only", ephemeral=True)
+        await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
         return False
     return True
 
@@ -136,6 +137,11 @@ async def on_message(message):
         if len(parts) == 2:
             victim = parts[0].strip()
             killer = parts[1].strip()
+
+            # the statistics will also be consistent
+            killer = killer.lower()
+            victim = victim.lower()
+
             now = datetime.utcnow()
 
             if killer not in killstreaks:
@@ -167,7 +173,7 @@ async def on_app_command_completion(interaction: discord.Interaction, command: a
 @app_commands.describe(leave="Set True to leave the voice channel")
 async def joinvoice(interaction: discord.Interaction, leave: bool = False):
     if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("Admin only", ephemeral=True)
+        await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
         return
     if leave:
         if interaction.guild.voice_client:
@@ -186,47 +192,90 @@ async def joinvoice(interaction: discord.Interaction, leave: bool = False):
 
 
 @bot.tree.command(name="stats", description="Show player stats")
-@app_commands.describe(player="Player", days="Days", public="Show publicly?")
-async def stats(interaction: discord.Interaction, player: str, days: int = 1, public: bool = False):
+@app_commands.describe(player="character_name or @discord_user", days="Days", public="Publish?")
+async def stats(interaction: Interaction, player: str, days: int = 1, public: bool = False):
     if public and not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("Admin only", ephemeral=True)
+        await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
         return
     if not await check_positive(interaction, days=days):
         return
+
+    if match := re.match(r"<@!?(\d+)>", player):  # Is this a user mention?
+        user_id = int(match.group(1))
+        characters = get_user_characters(user_id)
+        if not characters:
+            await interaction.response.send_message("❌ No characters linked to this user.", ephemeral=True)
+            return
+        await show_stats_for_characters(interaction, characters, days, public)
+    else:
+        await show_stats_for_characters(interaction, [player.lower()], days, public)
+
+
+@bot.tree.command(name="mystats", description="Show your stats (all linked characters)")
+@app_commands.describe(days="Days", public="Publish?")
+async def mystats(interaction: Interaction, days: int = 1, public: bool = False):
+    if public and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
+        return
+    if not await check_positive(interaction, days=days):
+        return
+
+    user_id = interaction.user.id
+    characters = get_user_characters(user_id)
+    if not characters:
+        await interaction.response.send_message("❌ You don't have any linked characters.", ephemeral=True)
+        return
+
+    # Use ready-made logic from /stats, but on all characters
+    await show_stats_for_characters(interaction, characters, days, public)
+
+
+async def show_stats_for_characters(interaction, characters: list[str], days: int, public: bool):
     since = datetime.utcnow() - timedelta(days=days)
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
-        c.execute("SELECT victim, COUNT(*) FROM frags WHERE killer = ? AND timestamp >= ? GROUP BY victim", (player, since))
-        victories = dict(c.fetchall())
-        c.execute("SELECT killer, COUNT(*) FROM frags WHERE victim = ? AND timestamp >= ? GROUP BY killer", (player, since))
-        defeats = dict(c.fetchall())
-    all_opponents = set(victories.keys()) | set(defeats.keys())
+        victories = {}
+        defeats = {}
+
+        characters = [c.lower() for c in characters]
+        for character in characters:
+            c.execute("SELECT victim, COUNT(*) FROM frags WHERE killer = ? AND timestamp >= ? GROUP BY victim", (character, since))
+            for row in c.fetchall():
+                victories[row[0]] = victories.get(row[0], 0) + row[1]
+
+            c.execute("SELECT killer, COUNT(*) FROM frags WHERE victim = ? AND timestamp >= ? GROUP BY killer", (character, since))
+            for row in c.fetchall():
+                defeats[row[0]] = defeats.get(row[0], 0) + row[1]
+
+    all_opponents = set(victories) | set(defeats)
     stats = []
     for opponent in all_opponents:
         wins = victories.get(opponent, 0)
         losses = defeats.get(opponent, 0)
         total = wins + losses
-        winrate = (wins / total) * 100 if total > 0 else 0
+        winrate = (wins / total) * 100 if total else 0
         stats.append((opponent, wins, losses, winrate))
+
     total_wins = sum(victories.values())
     total_losses = sum(defeats.values())
     total_matches = total_wins + total_losses
-    overall_winrate = (total_wins / total_matches) * 100 if total_matches > 0 else 0
-    embed = discord.Embed(title=f"📊 Player stats: {player} from {days} day(s)")
-    stats = sorted(stats, key=itemgetter(3), reverse=True)
-    for opponent, wins, losses, winrate in stats:
+    overall_winrate = (total_wins / total_matches) * 100 if total_matches else 0
+
+    embed = discord.Embed(title=f"📊 Combined stats for {len(characters)} character(s) in {days} day(s)")
+    for opponent, wins, losses, winrate in sorted(stats, key=itemgetter(3), reverse=True):
         embed.add_field(
-            name=f"{opponent}",
+            name=opponent,
             value=f"Wins: {wins} | Losses: {losses} | Winrate: {winrate:.1f}%",
             inline=False
         )
+
     summary = f"Total wins: {total_wins}\nTotal losses: {total_losses}\nOverall Winrate: {overall_winrate:.1f}%"
     await interaction.response.send_message(embed=embed, ephemeral=not public)
     await interaction.followup.send(content=f"```{summary}```", ephemeral=not public)
 
 
 @bot.tree.command(name="top", description="Top players by frags")
-@app_commands.describe(count="Number of top players", days="Days", public="Show publicly?")
+@app_commands.describe(count="Number of top players", days="Days", public="Publish?")
 async def top(interaction: Interaction, count: int = 5, days: int = 1, public: bool = False):
     if not await check_positive(interaction, count=count, days=days):
         return
@@ -365,6 +414,41 @@ async def reset(interaction: Interaction, backup: str = None):
         logging.info(f"Database restored from backup {backup}.")
 
 
+@bot.tree.command(name="linkcharacter", description="Link a game character to a Discord user")
+@app_commands.describe(character="Character's name", user="Discord User")
+async def linkcharacter(interaction: Interaction, character: str, user: discord.Member):
+    if not await require_admin(interaction):
+        return
+    character = character.lower()
+    set_character_owner(character, user.id)
+    await interaction.response.send_message(f"✅ The character **{character}** is linked to {user.mention}.", ephemeral=True)
+
+
+@bot.tree.command(name="unlinkcharacter", description="Remove the connection between the character and the user")
+@app_commands.describe(character="Character's name")
+async def unlinkcharacter(interaction: Interaction, character: str):
+    if not await require_admin(interaction):
+        return
+    character = character.lower()
+    removed = remove_character_owner(character)
+    if removed:
+        await interaction.response.send_message(f"🔗 Connection to the character **{character}** has been deleted.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"❌ The character **{character}** was not attached.", ephemeral=True)
+
+
+@bot.tree.command(name="whois", description="Show the character's owner")
+@app_commands.describe(character="Character's name")
+async def whois(interaction: Interaction, character: str):
+    character = character.lower()
+    discord_id = get_character_owner(character)
+    if discord_id:
+        user = await bot.fetch_user(discord_id)
+        await interaction.response.send_message(f"🎮 The character **{character}** belongs to {user.mention}.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"❌ The character **{character}** is not linked to any user.", ephemeral=True)
+
+
 @bot.tree.command(name="helpme", description="Show list of available commands")
 async def helpme(interaction: discord.Interaction):
     embed = discord.Embed(
@@ -373,6 +457,7 @@ async def helpme(interaction: discord.Interaction):
         color=discord.Color.purple(),
         timestamp=datetime.utcnow()
     )
+
     if interaction.user.guild_permissions.administrator:
         embed.add_field(
             name="🔧 Admin Commands",
@@ -380,22 +465,27 @@ async def helpme(interaction: discord.Interaction):
                 "⚙️ `/tracking [channel]` — Show or set the tracking channel\n"
                 "📢 `/announce [channel]` — Show or set the announce channel\n"
                 "⏳ `/killstreaktimeout [seconds]` — Show or set the killstreak timeout\n"
-                "🔊 `/joinvoice [leave]` — Adds or removes a bot from the voice channel\n"
+                "🔊 `/joinvoice [leave]` — Add or remove bot from voice channel\n"
                 "🎨 `/announcestyle [style]` — Show or set the announce style\n"
-                "🔁 `/reset [filename]` — Reset or restore database with backup\n"
+                "🔗 `/linkcharacter <character_name> <@discord_user>` — Link a character to a user\n"
+                "❌ `/unlinkcharacter <character_name>` — Unlink a character\n"
+                "🔁 `/reset [filename]` — Reset or restore database from backup\n"
             ),
             inline=False
         )
 
     embed.add_field(
-        name="👥 User Commands",
+        name="\n👥 User Commands",
         value=(
             "🏆 `/top <players> <days>` — Show top players\n"
-            "📊 `/stats <name> <days>` — Show player stats\n"
+            "📊 `/stats <character_name/@discord_user> <days>` — Show stats for character or user\n"
+            "🧍 `/mystats <days>` — Show your stats (linked characters)\n"
+            "🔍 `/whois <character_name>` — Show who owns this character\n"
             "❓ `/helpme` — Show this help message\n"
         ),
         inline=False
     )
+
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 

@@ -3,6 +3,7 @@
 import sqlite3
 import logging
 from datetime import datetime, timedelta
+from typing import Optional
 
 DB_FILE = None
 
@@ -36,6 +37,12 @@ def init_db():
                 value TEXT
             )
         """)
+        c.execute:("""
+            CREATE TABLE IF NOT EXISTS character_map (
+                character TEXT PRIMARY KEY,
+                discord_id INTEGER NOT NULL
+            )
+        """)
         conn.commit()
 
 
@@ -57,13 +64,13 @@ def set_setting(key, value):
 
 def get_tracking_channel_id():
     val = get_setting("tracking_channel_id")
-    logging.info(f"Tracking channel loaded from DB: {val}")
+    logging.info(f"💻 Tracking channel loaded from DB: {val}")
     return int(val) if val else None
 
 
 def get_announce_channel_id():
     val = get_setting("announce_channel_id")
-    logging.info(f"Announce channel loaded from DB: {val}")
+    logging.info(f"💻 Announce channel loaded from DB: {val}")
     return int(val) if val else None
 
 
@@ -97,3 +104,51 @@ def get_top_players(n=5, days=1):
             LIMIT ?
         """, (since, n))
         return c.fetchall()
+
+# --- Linking ---
+
+def link_character(character: str, discord_id: int):
+    with sqlite3.connect(get_db_path) as conn:
+        c = conn.cursor()
+        c.execute('''
+            INSERT INTO character_map (character, discord_id)
+            VALUES (?, ?)
+            ON CONFLICT(character) DO UPDATE SET discord_id=excluded.discord_id
+        ''', (character, discord_id))
+        conn.commit()
+
+
+def unlink_character(character: str):
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute('DELETE FROM character_map WHERE character = ?', (character,))
+        conn.commit()
+
+
+def get_user_characters(discord_id: int) -> list[str]:
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute('SELECT character FROM character_map WHERE discord_id = ?', (discord_id,))
+        return [row[0] for row in c.fetchall()]
+
+
+def set_character_owner(character: str, discord_id: int):
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute('REPLACE INTO character_map (character, discord_id) VALUES (?, ?)', (character, discord_id))
+        conn.commit()
+
+
+def get_character_owner(character: str) -> Optional[int]:
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute('SELECT discord_id FROM character_map WHERE character = ?', (character,))
+        row = c.fetchone()
+        return row[0] if row else None
+
+def remove_character_owner(character: str) -> bool:
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute('DELETE FROM character_map WHERE LOWER(character) = LOWER(?)', (character,))
+        conn.commit()
+        return c.rowcount > 0
