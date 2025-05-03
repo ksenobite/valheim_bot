@@ -4,6 +4,10 @@
 
 ## v4.3.0 — 2025-05-03
 - Added the bot version to the `/helpme` embed footer.
+- The database structure has been changed.
+- Improved logging
+- Improved output of user statistics
+- Additional error handling
 
 ## v4.2.0 — 2025-05-02
 - New admin commands (`/linkcharacter`, `/unlinkcharacter`) so that you can establish a match between the game character and the Discord user.
