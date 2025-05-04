@@ -1,6 +1,9 @@
 #### 📄 `CHANGELOG.md`
 ```markdown
 
+## v4.4.0 — 2025-05-05
+- Discord user names and avatars are now displayed in the statistics
+- User role definition and coloring support
 
 ## v4.3.0 — 2025-05-03
 - Added the bot version to the `/helpme` embed footer.
