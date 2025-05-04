@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 import sqlite3
 import logging
 from datetime import datetime, timedelta
@@ -151,3 +150,11 @@ def remove_character_owner(character: str) -> bool:
         c.execute('DELETE FROM character_map WHERE LOWER(character) = LOWER(?)', (character,))
         conn.commit()
         return c.rowcount > 0
+
+def get_discord_id_by_character(character_name: str) -> Optional[int]:
+    """Возвращает Discord ID, связанный с персонажем, или None если связки нет."""
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute("SELECT discord_id FROM character_map WHERE character = ?", (character_name.lower(),))
+        result = c.fetchone()
+        return result[0] if result else None

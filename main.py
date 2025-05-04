@@ -10,15 +10,18 @@ import discord
 import re
 
 from dotenv import load_dotenv
-from discord.ext import commands
-from discord import app_commands, Interaction
 from datetime import datetime, timedelta
 from operator import itemgetter
+
 from db import *
 from killstreaks import *
 
-
-BOT_VERSION = "4.3.0"
+from discord.ext import commands
+from discord import app_commands, Interaction
+from discord import Member, Role, Color
+from discord import Embed, ui
+from discord.app_commands import describe
+from discord.utils import get
 
 
 try:
@@ -28,6 +31,8 @@ except ImportError:
 
 #  --- Consts ---
 
+BOT_VERSION = "4.4.0"
+TOP_PAGE_SIZE = 10 # how many entries per page
 BACKUP_DIR = 'db_backups'
 killstreaks = {}
 
@@ -110,6 +115,7 @@ class FragBot(commands.Bot):
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 bot = FragBot(command_prefix=">", intents=intents)
 
 CURRENT_STYLE = get_announce_style()
@@ -235,6 +241,29 @@ async def mystats(interaction: Interaction, days: int = 1, public: bool = False)
     await show_stats_for_characters(interaction, characters, days, public)
 
 
+async def resolve_display_data(interaction: discord.Interaction, character_name: str) -> dict:
+    from db import get_discord_id_by_character
+
+    discord_id = get_discord_id_by_character(character_name)
+    if discord_id:
+        member = interaction.guild.get_member(discord_id)
+        if member:
+            top_role = max(member.roles[1:], key=lambda r: r.position, default=None)  # skip @everyone
+            return {
+                "display_name": member.display_name,
+                "avatar_url": member.display_avatar.url,
+                "color": top_role.color if top_role else discord.Color.default(),
+                "role": top_role.name if top_role else None
+            }
+    # fallback — unknown character
+    return {
+        "display_name": character_name,
+        "avatar_url": None,
+        "color": discord.Color.default(),
+        "role": None
+    }
+
+
 def get_winrate_emoji(winrate: float) -> str:
     if winrate > 60:
         return "🟢"
@@ -284,51 +313,151 @@ async def show_stats_for_characters(interaction, characters: list[str], days: in
     total_matches = total_wins + total_losses
     overall_winrate = (total_wins / total_matches) * 100 if total_matches else 0
 
-    # 📦 Embed Formation
+    # # 🎨 Prepare embed
+    emoji_summary = get_winrate_emoji(overall_winrate)
+
+    # ✅ You can take the color of the top-1 role, if that's important
+    top_character = max(stats, key=itemgetter(3))[0] if stats else None
+    color = discord.Color.blue()
+    if top_character:
+        display_data_top = await resolve_display_data(interaction, top_character)
+        color = display_data_top["color"]
+
     embed = discord.Embed(
-        title=f"📊 Combined stats for {len(characters)} character(s) in {days} day(s)",
-        color=discord.Color.blue()
+        title=f"📊 Stats for {len(characters)} character(s) in {days} day(s)",
+        color=color
     )
 
     for opponent, wins, losses, winrate in sorted(stats, key=itemgetter(3), reverse=True):
+        display_data = await resolve_display_data(interaction, opponent)
         emoji = get_winrate_emoji(winrate)
-        embed.add_field(
-            name=f"{emoji} {opponent.upper()}",
-            value=f"Wins: {wins} | Losses: {losses} | Winrate: {winrate:.1f}%",
-            inline=False
+        name_field = f"{emoji} {display_data['display_name'].upper()}"
+        value_field = (
+            f"Wins: **{wins}** / Losses: **{losses}** / Winrate: **{winrate:.1f}%**\n"
+            f"Role: {display_data['role'] or '—'}"
         )
+        embed.add_field(name=name_field, value=value_field, inline=False)
 
-    # 📢 General summary — bold and bottom
-    emoji_summary = get_winrate_emoji(overall_winrate)
     embed.add_field(
-        name="**__Overall Performance Summary__**",
+        name="__Summary:__",
         value=(
-            f"**Total Wins:** {total_wins}  \n"
-            f"**Total Losses:** {total_losses}  \n"
-            f"**Overall Winrate:** {emoji_summary} **{overall_winrate:.1f}%**"
+            f"Wins: **{total_wins}**  \n"
+            f"Losses: **{total_losses}**  \n"
+            f"Winrate: {emoji_summary} **{overall_winrate:.1f}%**"
         ),
         inline=False
     )
 
+    # 🖼️ Avatar and author, if one character
+    if len(characters) == 1:
+        display_data = await resolve_display_data(interaction, characters[0])
+        if display_data['avatar_url']:
+            embed.set_thumbnail(url=display_data['avatar_url'])
+        embed.color = display_data['color']
+
     await interaction.response.send_message(embed=embed, ephemeral=not public)
 
+# Getting the color by user role
+def get_embed_color_by_roles(member: discord.Member) -> discord.Color:
+    priority_roles = [
+        "Смертельно опасен", "Убить лишь завидев", "Опасен",
+        "Мужчина", "Подает надежды", "Не опасен", "Покончил с PvP"
+    ]
+    role_colors = {role.name: role.color for role in member.roles}
+    for role_name in priority_roles:
+        if role_name in role_colors:
+            return role_colors[role_name]
+    return discord.Color.default()
 
+# Single page view of the top
+def build_top_embed(interaction, stats, page, total_pages):
+    embed = Embed(title=f"🏆   **Top Players**    Page {page+1}/{total_pages}")
+
+    for i, (player, score, member) in enumerate(stats, start=1 + page * TOP_PAGE_SIZE):
+        name = member.display_name if member else player
+        emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+        embed.add_field(
+            name=f"{emoji} {name}",
+            value=f"Kills: {score}",
+            inline=False
+        )
+
+    if stats and stats[0][2]:  # If the leader has a member object
+        embed.set_thumbnail(url=stats[0][2].display_avatar.url)
+        embed.color = get_embed_color_by_roles(stats[0][2])
+    else:
+        embed.color = discord.Color.blue()
+
+    return embed
+
+
+# Pagination representation
+class TopPagination(ui.View):
+    def __init__(self, interaction, stats, public):
+        super().__init__(timeout=60)
+        self.interaction = interaction
+        self.stats = stats
+        self.page = 0
+        self.public = public
+        self.total_pages = (len(stats) + TOP_PAGE_SIZE - 1) // TOP_PAGE_SIZE
+
+    async def update(self, interaction):
+        start = self.page * TOP_PAGE_SIZE
+        end = start + TOP_PAGE_SIZE
+        embed = build_top_embed(interaction, self.stats[start:end], self.page, self.total_pages)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @ui.button(label="⏮️", style=discord.ButtonStyle.grey)
+    async def first_page(self, interaction: Interaction, _):
+        self.page = 0
+        await self.update(interaction)
+
+    @ui.button(label="⬅️", style=discord.ButtonStyle.blurple)
+    async def prev_page(self, interaction: Interaction, _):
+        if self.page > 0:
+            self.page -= 1
+        await self.update(interaction)
+
+    @ui.button(label="➡️", style=discord.ButtonStyle.blurple)
+    async def next_page(self, interaction: Interaction, _):
+        if self.page < self.total_pages - 1:
+            self.page += 1
+        await self.update(interaction)
+
+    @ui.button(label="⏭️", style=discord.ButtonStyle.grey)
+    async def last_page(self, interaction: Interaction, _):
+        self.page = self.total_pages - 1
+        await self.update(interaction)
+
+
+# Updated team /top
 @bot.tree.command(name="top", description="Top players by frags")
-@app_commands.describe(count="Number of top players", days="Days", public="Publish?")
+@describe(count="Number of top players", days="Days", public="Publish?")
 async def top(interaction: Interaction, count: int = 5, days: int = 1, public: bool = False):
     if not await check_positive(interaction, count=count, days=days):
         return
     if public and not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
         return
-    top_stats = get_top_players(count, days)
-    if not top_stats:
-        await interaction.response.send_message(f"❌ No data for last {days} day(s).", ephemeral=not public)
+
+    raw_stats = get_top_players(count, days)  # [(char_name, score)]
+    if not raw_stats:
+        await interaction.response.send_message("❌ No data.", ephemeral=not public)
         return
-    embed = discord.Embed(title=f"Top {count} players in the last {days} day(s)")
-    for i, (player, score) in enumerate(top_stats, 1):
-        embed.add_field(name="\u200b", value=f"{i}. {player}:   {score}", inline=False)
-    await interaction.response.send_message(embed=embed, ephemeral=not public)
+
+    guild = interaction.guild
+    enriched_stats = []
+    for name, score in raw_stats:
+        user_id = get_discord_id_by_character(name)
+        member = guild.get_member(user_id) if user_id else None
+        enriched_stats.append((name, score, member))
+
+    view = TopPagination(interaction, enriched_stats, public)
+    await interaction.response.send_message(
+        embed=build_top_embed(interaction, enriched_stats[:TOP_PAGE_SIZE], 0, view.total_pages),
+        view=view,
+        ephemeral=not public
+    )
 
 
 @bot.tree.command(name="announcestyle", description="Show or set the killstreak announce style")
