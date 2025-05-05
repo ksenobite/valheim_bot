@@ -1,7 +1,10 @@
 #### 📄 `CHANGELOG.md`
 ```markdown
 
-## v4.4.0 — 2025-05-05
+## v5.0.0 — 2025-05-05
+- 🥳 😍 🤖 Added Discord user role management by bot
+
+## v4.4.0 — 2025-05-04
 - Discord user names and avatars are now displayed in the statistics
 - User role definition and coloring support
 

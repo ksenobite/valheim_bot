@@ -24,6 +24,7 @@ from discord.app_commands import describe
 from discord.utils import get
 
 
+
 try:
     import nacl
 except ImportError:
@@ -31,12 +32,29 @@ except ImportError:
 
 #  --- Consts ---
 
-BOT_VERSION = "4.4.0"
+BOT_VERSION = "5.0.0"
 TOP_PAGE_SIZE = 10 # how many entries per page
 BACKUP_DIR = 'db_backups'
 killstreaks = {}
 
 # --- Additional ---
+
+def get_role_by_kills(kills: int) -> str:
+    if kills >= 400:
+        return "Смертельно опасен"
+    elif kills >= 300:
+        return "Убить лишь завидев"
+    elif kills >= 200:
+        return "Опасен"
+    elif kills >= 100:
+        return "Мужчина"
+    elif kills >= 25:
+        return "Подает надежды"
+    elif kills >= 5:
+        return "Не опасен"
+    else:
+        return "Покончил с PvP"
+
 
 async def check_positive(interaction: discord.Interaction, **kwargs):
     for name, value in kwargs.items():
@@ -60,6 +78,86 @@ def get_current_killstreak_timeout():
 
 def get_base_dir():
     return os.path.dirname(os.path.abspath(sys.argv[0]))
+
+async def weekly_role_update_function(bot: commands.Bot):
+    print("[ROLE UPDATE] Manual or scheduled role update started")
+    db = sqlite3.connect("frags.db")
+    cursor = db.cursor()
+    week_ago = datetime.utcnow() - timedelta(days=7)
+    cursor.execute(
+        "SELECT killer, COUNT(*) FROM frags WHERE timestamp >= ? GROUP BY killer",
+        (week_ago.isoformat(),),
+    )
+    killer_data = cursor.fetchall()
+
+    cursor.execute("SELECT character, discord_id FROM character_map")
+    char_map = dict(cursor.fetchall())
+
+    guild = discord.utils.get(bot.guilds)
+    if not guild:
+        print("[ROLE UPDATE] No guild found")
+        return
+
+    role_names = [
+        "Покончил с PvP", "Не опасен", "Подает надежды", "Мужчина",
+        "Опасен", "Убить лишь завидев", "Смертельно опасен"
+    ]
+    role_objects = {r.name: r for r in guild.roles if r.name in role_names}
+
+    for killer, kill_count in killer_data:
+        discord_id = char_map.get(killer)
+        if not discord_id:
+            continue
+
+        member = guild.get_member(discord_id)
+        if not member:
+            continue
+
+        desired_role_name = get_role_by_kills(kill_count)
+        desired_role = role_objects.get(desired_role_name)
+
+        if desired_role is None:
+            continue
+
+        current_roles = [r for r in member.roles if r.name in role_names]
+        if desired_role not in current_roles:
+            try:
+                await member.remove_roles(*current_roles)
+                await member.add_roles(desired_role)
+                print(f"[ROLE UPDATE] {member.display_name} -> {desired_role_name}")
+            except Exception as e:
+                print(f"[ROLE UPDATE ERROR] {member.display_name}: {e}")
+
+
+async def check_and_run_weekly_update_on_startup(bot: commands.Bot):
+    db = sqlite3.connect("frags.db")
+    cursor = db.cursor()
+    cursor.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+    db.commit()
+
+    today = datetime.utcnow().date()
+    weekday = today.weekday()  # Sunday = 6
+    if weekday != 6:
+        return
+
+    cursor.execute("SELECT value FROM settings WHERE key = 'last_role_update'")
+    row = cursor.fetchone()
+    last_run = datetime.fromisoformat(row[0]).date() if row else None
+
+    if last_run == today:
+        print("[STARTUP] Role update already done today")
+        return
+
+    await weekly_role_update_function(bot)
+
+    cursor.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+        ('last_role_update', datetime.utcnow().isoformat())
+    )
+    db.commit()
+    print("[STARTUP] Weekly role update executed on startup")
+
+
 
 #  --- Logging --- 
 
@@ -127,6 +225,8 @@ KILLSTREAK_TIMEOUT = get_current_killstreak_timeout()
 async def on_ready():
     user = bot.user
     logging.info(f"🤖 Bot(v.{BOT_VERSION}) is ready! Logged in as {user} (ID: {user.id})")
+    
+    await check_and_run_weekly_update_on_startup(bot)
 
     if get_tracking_channel_id() is None:
         logging.warning("⚠️ Tracking channel is not set.")
@@ -618,6 +718,16 @@ async def whois(interaction: Interaction, character: str):
         await interaction.response.send_message(f"❌ The character **{character}** is not linked to any user.", ephemeral=True)
 
 
+@bot.tree.command(name="forceroleupdate", description="Force roles to be updated based on weekly kills")
+async def forceroleupdate(interaction: discord.Interaction):
+    if not await require_admin(interaction):
+        return
+    await interaction.response.defer(thinking=True)
+    await weekly_role_update_function(interaction.client)  # Вызываем основную функцию вручную
+    await interaction.followup.send("The roles were updated manually")
+
+
+
 @bot.tree.command(name="helpme", description="Show list of available commands")
 async def helpme(interaction: discord.Interaction):
     embed = discord.Embed(
@@ -638,6 +748,7 @@ async def helpme(interaction: discord.Interaction):
                 "🎨 `/announcestyle [style]` — Show or set the announce style\n"
                 "🔗 `/linkcharacter <character_name> <@discord_user>` — Link a character to a user\n"
                 "❌ `/unlinkcharacter <character_name>` — Unlink a character\n"
+                "👑 `/forceroleupdate - Forcibly updates roles for all linked users\n"
                 "🔁 `/reset [filename]` — Reset or restore database from backup\n"
             ),
             inline=False
