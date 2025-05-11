@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
+
 import sqlite3
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
+
 
 DB_FILE = None
 

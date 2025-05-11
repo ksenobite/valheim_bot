@@ -20,8 +20,6 @@ nuitka ^
   --output-dir=dist ^
   --remove-output ^
   --include-data-dir=sounds=sounds ^
-  @REM --include-data-file=.env=.env ^
-  @REM --include-data-file=frags.db=frags.db ^
   --include-data-file=opus.dll=opus.dll ^
   --windows-icon-from-ico=repear.ico ^
   %ENTRY%
