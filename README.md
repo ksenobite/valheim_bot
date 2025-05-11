@@ -31,8 +31,7 @@ pip install -r requirements.txt
         ```doublekill.wav```, ```triplekill.wav```, ```ultrakill.wav```, ```rampage.wav```, ```silent.wav``` (mute file to keep the bot in the voice channel).
     
 5. **Run the bot:**
-    ⚙️ Build (Standalone Executable)
-    To create a standalone .exe:
+- ⚙️ `main.exe` (Standalone Executable)
 
 🧱 **Requirements:**
 - Python 3.9+ (requires installation)
@@ -42,14 +41,15 @@ pip install -r requirements.txt
 
 🔨 **Build**
 Run build.bat. It will:
-- compile main.py into a standalone .exe
+- assemble the project in main.exe
 - include /sounds/ directory and opus.dll
 - exclude .env and frags.db for safety (user adds them after build)
+- for Windows OS, you can use `build.bat` for building in the root of the project
 
 **After building, manually copy:**
 - .env
 - frags.db (if there is no database, it will be created automatically.)
-Into the output directory next to `main.exe`.
+Into the output directory next to `main.exe`
 
 📁 **Project Structure**
 
