@@ -13,10 +13,8 @@ def set_db_path(path):
     DB_FILE = path
     logging.info(f"📁 Using database at: {DB_FILE}")
 
-
 def get_db_path():
     return DB_FILE
-
 
 def init_db():
     if not DB_FILE:
@@ -46,14 +44,12 @@ def init_db():
         """)
         conn.commit()
 
-
 def get_setting(key):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("SELECT value FROM settings WHERE key = ?", (key,))
         row = c.fetchone()
         return row[0] if row else None
-
 
 def set_setting(key, value):
     with sqlite3.connect(DB_FILE) as conn:
@@ -91,7 +87,6 @@ def add_frag(killer, victim):
     except sqlite3.Error as e:
         logging.error(f"❌ Error when adding a frag: {e}")
 
-
 def get_top_players(n=5, days=1):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
@@ -117,13 +112,11 @@ def link_character(character: str, discord_id: int):
         ''', (character, discord_id))
         conn.commit()
 
-
 def unlink_character(character: str):
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
         c.execute('DELETE FROM character_map WHERE character = ?', (character,))
         conn.commit()
-
 
 def get_user_characters(discord_id: int) -> list[str]:
     with sqlite3.connect(get_db_path()) as conn:
@@ -131,13 +124,11 @@ def get_user_characters(discord_id: int) -> list[str]:
         c.execute('SELECT character FROM character_map WHERE discord_id = ?', (discord_id,))
         return [row[0] for row in c.fetchall()]
 
-
 def set_character_owner(character: str, discord_id: int):
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
         c.execute('REPLACE INTO character_map (character, discord_id) VALUES (?, ?)', (character, discord_id))
         conn.commit()
-
 
 def get_character_owner(character: str) -> Optional[int]:
     with sqlite3.connect(get_db_path()) as conn:
@@ -160,3 +151,51 @@ def get_discord_id_by_character(character_name: str) -> Optional[int]:
         c.execute("SELECT discord_id FROM character_map WHERE character = ?", (character_name.lower(),))
         result = c.fetchone()
         return result[0] if result else None
+
+# --- Roles ---
+
+def init_rank_roles_table():
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS rank_roles (
+                wins_threshold INTEGER PRIMARY KEY,
+                role_name TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+
+def set_rank_role(wins_threshold: int, role_name: str):
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO rank_roles (wins_threshold, role_name)
+            VALUES (?, ?)
+            ON CONFLICT(wins_threshold) DO UPDATE SET role_name=excluded.role_name
+        """, (wins_threshold, role_name))
+        conn.commit()
+
+def clear_rank_roles():
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM rank_roles")
+        conn.commit()
+
+def get_all_rank_roles() -> list[tuple[int, str]]:
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute("SELECT wins_threshold, role_name FROM rank_roles ORDER BY wins_threshold DESC")
+        return c.fetchall()
+
+def is_auto_role_update_enabled() -> bool:
+    return get_setting("auto_role_update_enabled") == "1"
+
+def set_auto_role_update_enabled(enabled: bool):
+    set_setting("auto_role_update_enabled", "1" if enabled else "0")
+
+def get_auto_role_update_days(default: int = 7) -> int:
+    value = get_setting("auto_role_update_days")
+    return int(value) if value and value.isdigit() else default
+
+def set_auto_role_update_days(days: int):
+    set_setting("auto_role_update_days", str(days))

@@ -1,6 +1,29 @@
 #### 📄 `CHANGELOG.md`
 ```markdown
 
+## v6.0.0 — 2025-05-13
+- 🔄 **Complete redesign of the system of ranked roles**
+- The old hard-coded list of `ROLE_THRESHOLES` has been deleted.
+  - Roles are now configured via the commands `/roleset`, `/roleclear`, `/roles`.
+  - The configuration is stored in the database and does not depend on the language or names on the server.
+
+- ⚙️ **A system for auto-updating roles has been introduced**
+- New commands: `/autoroles`, `/autorolestatus`, `/autoroletimeout'.
+  - The bot can automatically assign PvP roles for each update based on the number of wins in the last N days.
+
+- ✨ **Updated team names to improve UX**
+  - Short and easy-to-remember commands: `/link`, `/unlink`, `/roleset`, `/roleupdate`, `/roles`, etc.
+  - '/helpme` now displays commands in an improved readable form.
+
+- 🧠 **Updated the logic of determining the role by wins**
+- Roles are selected dynamically, taking into account the current configuration.
+
+- Outdated code and dependencies have been removed:
+- The old binding functions to `ROLE_THRESHOLES` are no longer used.
+  - Cleaning `roles.py `, `utils.py `, removed unnecessary imports and logic.
+
+- Improved stability and convenience of project expansion in the future.
+
 ## v5.0.1 — 2025-05-10
 - Complete refactoring of the project: the code is divided into modules (`main.py `, `commands.py `, `roles.py `, `announcer.py `, `utils.py `, `settings.py `)
 - 🛠 Fixed critical errors in updating roles — the bot handles guild members correctly

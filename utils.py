@@ -3,8 +3,7 @@
 import discord
 import logging
 
-from db import get_discord_id_by_character
-from roles import ROLE_THRESHOLDS
+from db import get_discord_id_by_character, get_all_rank_roles
 
 
 def get_winrate_emoji(winrate: float) -> str:
@@ -16,18 +15,15 @@ def get_winrate_emoji(winrate: float) -> str:
     else:
         return "🔴"
 
-
 def safe_display_name(member: discord.Member) -> str:
     """Returns the readable name of the participant."""
     return member.nick or member.display_name or member.name
-
 
 async def require_admin(interaction: discord.Interaction) -> bool:
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
         return False
     return True
-
 
 async def check_positive(interaction: discord.Interaction, **kwargs):
     for name, value in kwargs.items():
@@ -36,12 +32,12 @@ async def check_positive(interaction: discord.Interaction, **kwargs):
             return False
     return True
 
-
 async def resolve_display_data(character_name: str, guild: discord.Guild) -> dict:
     """
-    Determines how to display the character beautifully:
-    - if there is a connection, returns the username, role, avatar
-        - otherwise, it displays the character's name
+    Returns display data for the character:
+    - If character is linked to a Discord user and found in guild:
+        -> return their name, avatar, color and PvP role.
+    - Else: show character name only.
     """
     discord_id = get_discord_id_by_character(character_name)
     if not discord_id:
@@ -63,10 +59,9 @@ async def resolve_display_data(character_name: str, guild: discord.Guild) -> dic
                 "role": None,
                 "color": discord.Color.default()
             }
-    # Let's define the role by color (priority: top of the list of known ones)
-    known_role_names = [name for _, name, _ in ROLE_THRESHOLDS]
-    role = next((r for r in member.roles if r.name in known_role_names), None)
-
+    # Use role color from PvP roles configured in DB
+    configured_roles = [name for _, name in get_all_rank_roles()]
+    role = next((r for r in member.roles if r.name in configured_roles), None)
     return {
         "display_name": safe_display_name(member),
         "avatar_url": member.display_avatar.url,

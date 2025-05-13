@@ -3,15 +3,17 @@
 import os
 import sys
 import logging
-import discord
 import re
+import ctypes
+import discord
+import discord.opus
 
 from dotenv import load_dotenv
 from datetime import datetime
 from discord.ext import commands
 
 from commands import setup_commands
-from db import get_setting, set_db_path, init_db, get_tracking_channel_id, add_frag
+from db import get_setting, set_db_path, init_db, get_tracking_channel_id, add_frag, init_rank_roles_table
 from announcer import set_sounds_path, send_killstreak_announcement, play_killstreak_sound
 from settings import BOT_VERSION, get_env_path, get_db_file_path, get_sounds_path
 
@@ -27,6 +29,16 @@ logging.basicConfig(
     ]
 )
 
+# --- Check Opus ---
+if not discord.opus.is_loaded():
+    dll_path = os.path.join(os.path.dirname(__file__), "opus.dll")
+    discord.opus.load_opus(dll_path)
+
+if discord.opus.is_loaded():
+    logging.info("🎧 Opus successfully loaded.")
+else:
+    logging.error("❌ Opus failed to load.")
+
 # --- Bot Initialization ---
 
 intents = discord.Intents.default()
@@ -40,6 +52,7 @@ setup_commands(bot)  # 👈 registering the commands
 set_db_path(get_db_file_path())
 set_sounds_path(get_sounds_path())
 init_db()
+init_rank_roles_table()
 
 # --- Load .env ---
 
@@ -57,6 +70,16 @@ if not TOKEN:
 
 killstreaks = {}
 KILLSTREAK_TIMEOUT = int(get_setting("killstreak_timeout") or 15)
+
+# --- Events ---
+
+@bot.event
+async def on_ready():
+    try:
+        synced = await bot.tree.sync()
+        logging.info(f"🌐 Synced {len(synced)} commands.")
+    except Exception as e:
+        logging.error(f"❌ Failed to sync commands: {e}")
 
 
 @bot.event

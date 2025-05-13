@@ -4,19 +4,9 @@ import discord
 import logging
 import sqlite3
 from datetime import datetime, timedelta
-from db import get_db_path, get_user_characters
+from db import get_db_path, get_user_characters, get_all_rank_roles
+from typing import Optional
 
-
-# 🏆  Threshold roles and colors — Discord roles must be created on the server with exactly the same names
-ROLE_THRESHOLDS = [
-    (400, "Смертельно опасен", discord.Color.purple()),
-    (300, "Убить лишь завидев", discord.Color.magenta()),
-    (200, "Опасен", discord.Color.orange()),
-    (100, "Мужчина", discord.Color.gold()),
-    (25, "Подает надежды", discord.Color.green()),
-    (5, "Не опасен", discord.Color.light_grey()),
-    (0, "Покончил с PvP", discord.Color.dark_grey())
-]
 
 def get_wins_for_user(discord_id: int, days: int = 7) -> int:
     """Counts the number of wins of all tied characters in the last N days."""
@@ -37,46 +27,51 @@ def get_wins_for_user(discord_id: int, days: int = 7) -> int:
                 wins += row[0]
     return wins
 
-
-def find_role_by_win_count(wins: int) -> str:
-    """Finds the role name based on the number of wins."""
-    for threshold, role_name, _ in ROLE_THRESHOLDS:
+def find_role_name_by_wins(wins: int) -> Optional[str]:
+    """
+    Returns the role name based on number of wins.
+    Uses the dynamic configuration stored in the database.
+    """
+    thresholds = sorted(get_all_rank_roles(), key=lambda x: x[0], reverse=True)
+    for threshold, role_name in thresholds:
         if wins >= threshold:
             return role_name
-    return ROLE_THRESHOLDS[-1][1]  # fallback
+    return None
 
-
-async def assign_role_based_on_wins(member: discord.Member):
-    """Assigns a suitable role to the participant."""
+async def assign_role_based_on_wins(member: discord.Member, days: int = 7):
+    """Assigns the appropriate PvP role to the member based on recent wins."""
     guild = member.guild
-    wins = get_wins_for_user(member.id)
-    role_name = find_role_by_win_count(wins)
+    wins = get_wins_for_user(member.id, days)
+    role_name = find_role_name_by_wins(wins)
+    if not role_name:
+        logging.info(f"ℹ️ No matching role for {wins} wins — skipping {member.display_name}.")
+        return
     target_role = discord.utils.get(guild.roles, name=role_name)
     if not target_role:
         logging.warning(f"⚠️ Role '{role_name}' not found in guild.")
         return
-    # Removing other PvP roles
-    existing_roles = [r for r in member.roles if r.name in [name for _, name, _ in ROLE_THRESHOLDS]]
-    if target_role not in existing_roles:
+    # Remove existing PvP roles before assigning new one
+    configured_roles = [rname for _, rname in get_all_rank_roles()]
+    current_roles = [r for r in member.roles if r.name in configured_roles]
+    if target_role not in current_roles:
         try:
-            await member.remove_roles(*existing_roles, reason="PvP role update")
+            await member.remove_roles(*current_roles, reason="PvP role update")
             await member.add_roles(target_role, reason="PvP role update")
-            logging.info(f"✅ Assigned role '{target_role.name}' to {member.display_name}")
+            logging.info(f"✅ Assigned role '{target_role.name}' to {member.display_name} ({wins} wins)")
         except Exception as e:
             logging.warning(f"❌ Failed to assign role for {member.display_name}: {e}")
 
-
-async def update_roles_for_all_members(bot: discord.Client):
-    """Updates the roles of all users in the guilds where the bot is running."""
+async def update_roles_for_all_members(bot: discord.Client, days: int = 7):
+    """Updates PvP roles for all members across all guilds."""
     for guild in bot.guilds:
         logging.info(f"🔁 Updating roles in guild: {guild.name}")
         for member in guild.members:
             logging.info(f"🔍 Проверка участника: {member.display_name} ({member.id})")
-            characters = get_user_characters(member.id)
-            if not characters:
-                logging.info(f"⛔ Нет привязанных персонажей — пропуск.")
-                continue
-            logging.info(f" Найдено персонажей: {characters}")
             if member.bot:
                 continue
-            await assign_role_based_on_wins(member)
+            characters = get_user_characters(member.id)
+            if not characters:
+                logging.info("⛔ Нет привязанных персонажей — пропуск.")
+                continue
+            logging.info(f"✅ Найдено персонажей: {characters}")
+            await assign_role_based_on_wins(member, days=days)
