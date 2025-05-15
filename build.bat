@@ -1,3 +1,4 @@
+@REM build.bat
 @echo off
 title ⚙️ Building Discord Bot with Nuitka (Standalone - WAV Support)
 echo ===============================

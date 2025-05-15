@@ -1,4 +1,5 @@
-# 🤖 Valheim PvP Bot
+#### 📄 `README.md`
+## 🤖 Valheim PvP Bot
 
 ![Python](https://img.shields.io/badge/Python-3.9-blue)
 ![License](https://img.shields.io/github/license/ksenobite/valheim_bot)
@@ -10,12 +11,12 @@ A feature-rich Discord bot for Valheim PvP communities. Tracks killstreaks, anno
 
 ## 🎨 Features
 - ✅ Automatic kill tracking & killstreak recognition
-- 🔊 Dynamic sound announcements (doublekill, triplekill, etc.)
+- 🔥 **NEW:** Clean (deathless) streaks system with Dota-style levels
+- 🔊 Sound announcements with dynamic playback queue
+- 🖼️ Beautiful embed messages with roles, avatars, emojis
 - 📊 Player stats: `/stats`, `/top`, `/mystats`, `/whois`
-- 👑 Automatic PvP role assignment by weekly win count
-- 🛠 Fully configurable PvP role thresholds via commands
-- ♻️ Auto-role system with adjustable update window (in days)
-- 🎨 Custom killstreak styles: `classic`, `epic`, `tournament`
+- 👑 PvP role assignment by weekly win count (fully configurable)
+- ♻️ Auto-role update system with toggle and window configuration
 - 🧱 Standalone executable support (Nuitka + `opus.dll`)
 - 💾 Lightweight SQLite backend
 
@@ -29,7 +30,7 @@ A feature-rich Discord bot for Valheim PvP communities. Tracks killstreaks, anno
 3. **Add sound files** 
 - If you want to change the preset settings copy files to /sounds directory in `WAV (PCM, 48 kHz stereo)` format.
 - The files must keep the original names:
-        ```doublekill.wav```, ```triplekill.wav```, ```ultrakill.wav```, ```rampage.wav```, ```silent.wav``` (mute file to keep the bot in the voice channel).
+        ```doublekill.wav```, ```triplekill.wav```, ```ultrakill.wav```, ```rampage.wav```, ```silent.wav``` (mute file to keep the bot in the voice channel) etc.
 4. **Install Python dependencies**:
 ```bash
 pip install -r requirements.txt

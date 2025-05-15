@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+# main.py
+
 import os
 import sys
 import logging
@@ -13,8 +15,14 @@ from datetime import datetime
 from discord.ext import commands
 
 from commands import setup_commands
-from db import get_setting, set_db_path, init_db, get_tracking_channel_id, add_frag, init_rank_roles_table
-from announcer import set_sounds_path, send_killstreak_announcement, play_killstreak_sound
+from db import *
+from announcer import (
+    set_sounds_path,
+    send_killstreak_announcement,
+    send_deathless_announcement,
+    play_killstreak_sound,
+    play_deathless_sound,
+)
 from settings import BOT_VERSION, get_env_path, get_db_file_path, get_sounds_path
 
 
@@ -81,12 +89,9 @@ async def on_ready():
     except Exception as e:
         logging.error(f"❌ Failed to sync commands: {e}")
 
-
 @bot.event
 async def on_message(message):
-    if message.author.bot:
-        return
-
+    
     channel_id = get_tracking_channel_id()
     if channel_id and message.channel.id == channel_id:
         match = re.match(r"^(.+?) killed by (.+)$", message.content.strip())
@@ -96,7 +101,7 @@ async def on_message(message):
             victim = victim.strip().lower()
             now = datetime.utcnow()
 
-            # Killstreaks
+            # --- Regular Killstreaks ---
             if killer not in killstreaks:
                 killstreaks[killer] = {"count": 1, "last_kill_time": now}
             else:
@@ -114,10 +119,16 @@ async def on_message(message):
             if victim in killstreaks:
                 del killstreaks[victim]
 
+            # --- Save frag ---
             add_frag(killer, victim)
-        else:
-            logging.warning(f"⚠️  Message does not match kill format: {message.content}")
 
+            # --- Update deathless streaks ---
+            new_count = update_deathless_streaks(killer, victim)
+            if new_count:
+                await send_deathless_announcement(bot, killer, new_count)
+                await play_deathless_sound(bot, new_count, message.guild)
+        else:
+            logging.warning(f"⚠️ Message does not match kill format: {message.content}")
 
 # --- Run bot ---
 bot.run(TOKEN)

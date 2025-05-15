@@ -6,3 +6,4 @@ build/
 .env
 *.exe
 *.spec
+master_checklist.md

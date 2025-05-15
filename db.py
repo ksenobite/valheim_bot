@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 
+# db.py
+
 import sqlite3
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
+from settings import get_db_file_path
 
 
 DB_FILE = None
@@ -17,31 +20,33 @@ def get_db_path():
     return DB_FILE
 
 def init_db():
-    if not DB_FILE:
-        raise ValueError("DB_FILE is not set. Call set_db_path(path) first.")
-    with sqlite3.connect(DB_FILE) as conn:
+    with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
-        # SAFE: Creates tables only if they don't exist
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS frags (
-                id INTEGER PRIMARY KEY,
-                killer TEXT,
-                victim TEXT,
-                timestamp DATETIME
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS character_map (
-                character TEXT PRIMARY KEY,
-                discord_id INTEGER NOT NULL
-            )
-        """)
+
+        # Основные таблицы
+        c.execute("""CREATE TABLE IF NOT EXISTS frags (
+            id INTEGER PRIMARY KEY,
+            killer TEXT,
+            victim TEXT,
+            timestamp DATETIME
+        )""")
+
+        c.execute("""CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )""")
+
+        c.execute("""CREATE TABLE IF NOT EXISTS character_map (
+            character TEXT PRIMARY KEY,
+            discord_id INTEGER NOT NULL
+        )""")
+
+        # Новая таблица
+        c.execute("""CREATE TABLE IF NOT EXISTS deathless_streaks (
+            character TEXT PRIMARY KEY,
+            streak INTEGER NOT NULL
+        )""")
+
         conn.commit()
 
 def get_setting(key):
@@ -50,7 +55,7 @@ def get_setting(key):
         c.execute("SELECT value FROM settings WHERE key = ?", (key,))
         row = c.fetchone()
         return row[0] if row else None
-
+    
 def set_setting(key, value):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
@@ -199,3 +204,66 @@ def get_auto_role_update_days(default: int = 7) -> int:
 
 def set_auto_role_update_days(days: int):
     set_setting("auto_role_update_days", str(days))
+
+
+# --- deathstreaks ---
+
+def get_deathless_streak(character: str) -> int:
+    """Возвращает текущую 'чистую' серию побед персонажа."""
+    with sqlite3.connect(get_db_file_path()) as conn:
+        c = conn.cursor()
+        c.execute("SELECT count FROM deathless_streaks WHERE character = ?", (character.lower(),))
+        row = c.fetchone()
+        return row[0] if row else 0
+
+def increment_deathless_streak(character: str) -> int:
+    """Увеличивает серию на 1 и возвращает новое значение."""
+    current = get_deathless_streak(character)
+    new_value = current + 1
+    with sqlite3.connect(get_db_file_path()) as conn:
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO deathless_streaks (character, count)
+            VALUES (?, ?)
+            ON CONFLICT(character) DO UPDATE SET count = excluded.count
+        """, (character.lower(), new_value))
+    return new_value
+
+
+def reset_deathless_streak(character: str):
+    """Сбрасывает серию до 0."""
+    with sqlite3.connect(get_db_file_path()) as conn:
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO deathless_streaks (character, count)
+            VALUES (?, 0)
+            ON CONFLICT(character) DO UPDATE SET count = 0
+        """, (character.lower(),))
+
+# db.py (внизу файла)
+
+# 💀 Deathless streaks
+def update_deathless_streaks(killer: str, victim: str) -> int:
+    """
+    Updates the deathless streak for the killer and resets the victim's streak.
+    Returns the killer's updated streak count.
+    """
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+
+        # Reset victim's streak
+        c.execute("DELETE FROM deathless_streaks WHERE character = ?", (victim,))
+
+        # Get current killer streak
+        c.execute("SELECT streak FROM deathless_streaks WHERE character = ?", (killer,))
+        row = c.fetchone()
+
+        if row:
+            new_streak = row[0] + 1
+            c.execute("UPDATE deathless_streaks SET streak = ? WHERE character = ?", (new_streak, killer))
+        else:
+            new_streak = 1
+            c.execute("INSERT INTO deathless_streaks (character, streak) VALUES (?, ?)", (killer, new_streak))
+
+        conn.commit()
+        return new_streak

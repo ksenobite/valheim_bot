@@ -18,7 +18,7 @@ from operator import itemgetter
 from settings import BOT_VERSION, BACKUP_DIR, get_db_file_path
 from db import *
 from roles import update_roles_for_all_members
-from announcer import start_heartbeat_loop, KILLSTREAK_STYLES
+from announcer import start_heartbeat_loop, KILLSTREAK_STYLES, audio_queue_worker
 from utils import require_admin, check_positive, get_winrate_emoji, resolve_display_data
 
 
@@ -229,20 +229,25 @@ def setup_commands(bot: commands.Bot):
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
             return
+
+        await interaction.response.defer(thinking=True, ephemeral=True)  # 👈 ключевое изменение
+
         if leave:
             if interaction.guild.voice_client:
                 await interaction.guild.voice_client.disconnect()
-                await interaction.response.send_message("Disconnected from voice channel.", ephemeral=True)
+                await interaction.followup.send("Disconnected from voice channel.")
             else:
-                await interaction.response.send_message("I'm not connected to a voice channel.", ephemeral=True)
+                await interaction.followup.send("I'm not connected to a voice channel.")
         else:
             if interaction.user.voice is None:
-                await interaction.response.send_message("⚠️ You must be in a voice channel.", ephemeral=True)
+                await interaction.followup.send("⚠️ You must be in a voice channel.")
                 return
             channel = interaction.user.voice.channel
             await channel.connect()
-            await interaction.response.send_message(f"Connected to {channel.name}", ephemeral=True)
+            await interaction.followup.send(f"Connected to {channel.name}")
+            asyncio.create_task(audio_queue_worker(bot, interaction.guild))
             asyncio.create_task(start_heartbeat_loop(bot, interaction.guild))
+
 
     @bot.tree.command(name="style", description="Show or set the killstreak announce style")
     @app_commands.describe(style="Style name (classic, epic, tournament)")

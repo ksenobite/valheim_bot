@@ -1,6 +1,28 @@
 #### 📄 `CHANGELOG.md`
 ```markdown
 
+## v6.1.0 — 2025-05-15
+- ✨ **New Feature: Deathless Streaks**
+  - The bot now tracks “clean” killstreaks (until first death).
+  - Stylish text and embed announcements with customizable styles.
+  - Planned: sound support for deathless streaks.
+
+- 🔊 **Sound System Improvements**
+  - Sound playback is now queued to prevent overlapping killstreak and deathless sounds.
+
+- 📣 **Killstreak Announcements Improved**
+  - Embed format with Discord user name, avatar, color, and role.
+  - Now works even if character is not linked to a Discord user.
+
+- ⚙️ **New Auto-Role Features**
+  - New commands added:
+    - `/autoroles` — Enable or disable automatic role updates
+    - `/autorolestatus` — Show current auto-role status
+    - `/autoroletimeout` — Configure win window (in days) for roles
+
+- 🧼 General fixes and logging improvements
+
+
 ## v6.0.0 — 2025-05-13
 - 🔄 **Complete redesign of the system of ranked roles**
 - The old hard-coded list of `ROLE_THRESHOLES` has been deleted.

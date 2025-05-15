@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+# roles.py
+
 import discord
 import logging
 import sqlite3
