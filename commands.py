@@ -230,7 +230,7 @@ def setup_commands(bot: commands.Bot):
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
             return
 
-        await interaction.response.defer(thinking=True, ephemeral=True)  # 👈 ключевое изменение
+        await interaction.response.defer(thinking=True, ephemeral=True) 
 
         if leave:
             if interaction.guild.voice_client:

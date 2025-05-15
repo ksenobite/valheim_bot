@@ -11,7 +11,7 @@ A feature-rich Discord bot for Valheim PvP communities. Tracks killstreaks, anno
 
 ## 🎨 Features
 - ✅ Automatic kill tracking & killstreak recognition
-- 🔥 **NEW:** Clean (deathless) streaks system with Dota-style levels
+- 🔥 **NEW:** Killstreaks system with Dota2-style levels
 - 🔊 Sound announcements with dynamic playback queue
 - 🖼️ Beautiful embed messages with roles, avatars, emojis
 - 📊 Player stats: `/stats`, `/top`, `/mystats`, `/whois`

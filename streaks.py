@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime
 import logging
 
-# Конфигурация стилей текстовых анонсов для deathless streaks
+# Configuration of text announcement styles for deathless streaks
 DEATHLESS_STYLES = {
     "classic": {
         3: {"title": "⚔️ On a Killing Spree!", "emojis": "🔥"},
@@ -28,20 +28,20 @@ DEATHLESS_STYLES = {
     }
 }
 
-# Словарь активных серий: killer_name -> {"count": int, "last_kill": datetime}
+# Dictionary of active episodes: killer_name -> {"count": int, "last_kill": datetime}
 active_streaks = defaultdict(lambda: {"count": 0, "last_kill": None})
 
 def handle_kill(killer: str, victim: str):
-    """Обновляет серию побед."""
+    """Updates the winning streak."""
     killer = killer.lower()
     victim = victim.lower()
 
-    # Сбросить серию жертвы
+    # Reset the victim's series
     if victim in active_streaks:
         logging.info(f"🩸 Deathless streak reset: {victim}")
         del active_streaks[victim]
 
-    # Обновить серию убийцы
+    # Update the killer series
     active_streaks[killer]["count"] += 1
     active_streaks[killer]["last_kill"] = datetime.utcnow()
 
@@ -49,11 +49,11 @@ def handle_kill(killer: str, victim: str):
 
 
 def get_streak_announce(count: int, style: str = "classic"):
-    """Получить стиль для текущей deathless streak."""
+    """Get the style for the current deathless streak."""
     config = DEATHLESS_STYLES.get(style, {})
     return config.get(count, None)
 
 
 def reset_all_streaks():
-    """Полный сброс всех серий — например, при рестарте бота"""
+    """Full reset of all episodes — for example, when restarting the bot"""
     active_streaks.clear()

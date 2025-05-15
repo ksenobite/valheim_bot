@@ -53,6 +53,7 @@ KILLSTREAK_STYLES = {
     }
 }
 
+
 DEATHLESS_STYLES = {
     "classic": {
         3: {"title": "🔥 KILLING SPREE!", "emojis": "⚔️"},
@@ -73,6 +74,7 @@ DEATHLESS_STYLES = {
         9: {"title": "👑 THE GOD OF WAR!", "emojis": "👑✨"},
     }
 }
+
 
 def set_sounds_path(path):
     global SOUNDS_DIR
@@ -104,7 +106,7 @@ async def send_killstreak_announcement(bot, killer: str, count: int):
     if not data:
         return  # Not announcing for this kill count
 
-    # Получаем информацию об убийце
+    # Getting information about the killer
     try:
         guild = channel.guild
         display = await resolve_display_data(killer, guild)
@@ -117,7 +119,7 @@ async def send_killstreak_announcement(bot, killer: str, count: int):
         avatar_url = None
         color = discord.Color.default()
 
-    # Создаем embed-анонс
+    # Creating an embed announcement
     try:
         embed = discord.Embed(
             title=data["title"],
@@ -131,7 +133,6 @@ async def send_killstreak_announcement(bot, killer: str, count: int):
         logging.info(f"📣 Killstreak embed announcement sent: {data['title']} by {name}")
     except Exception as e:
         logging.exception(f"❌ Failed to send killstreak embed announcement: {e}")
-
 
 
 async def send_deathless_announcement(bot, killer: str, count: int):
@@ -155,7 +156,7 @@ async def send_deathless_announcement(bot, killer: str, count: int):
     if not data:
         return  # No announcement for this streak count
 
-    # Получаем информацию об игроке
+    # Getting information about the player
     try:
         guild = channel.guild
         display = await resolve_display_data(killer, guild)
@@ -168,7 +169,7 @@ async def send_deathless_announcement(bot, killer: str, count: int):
         avatar_url = None
         color = discord.Color.default()
 
-    # Создаем embed
+    # Embed Create
     try:
         embed = discord.Embed(
             title=data["title"],
@@ -182,8 +183,6 @@ async def send_deathless_announcement(bot, killer: str, count: int):
         logging.info(f"📣 Deathless streak embed announcement sent: {data['title']} by {name}")
     except Exception as e:
         logging.exception(f"❌ Failed to send embed deathless streak announcement: {e}")
-
-
 
 
 async def play_killstreak_sound(bot, count: int, guild: discord.Guild):
@@ -208,12 +207,6 @@ async def play_killstreak_sound(bot, count: int, guild: discord.Guild):
         voice_client.stop()
         logging.warning("⚠️ Stopped previous sound playback.")
     try:
-        # source = SimpleAudioSource(sound_file)
-        # voice_client.play(
-        #     source,
-        #     after=lambda e: logging.info(f"✅ Playback complete. Error: {e}" if e else "✅ Sound finished.")
-        # )
-        
         enqueue_sound(guild, sound_file)
         
         logging.info(f"🔊 Playing sound: {sound_file}")
@@ -251,18 +244,11 @@ async def play_deathless_sound(bot, count: int, guild: discord.Guild):
         logging.warning("⚠️ Stopped previous sound playback.")
 
     try:
-        # source = SimpleAudioSource(sound_file)
-        # voice_client.play(
-        #     source,
-        #     after=lambda e: logging.info(f"✅ Deathless playback complete. Error: {e}" if e else "✅ Deathless sound finished.")
-        # )
-        
         enqueue_sound(guild, sound_file)
         
         logging.info(f"🔊 Playing deathless sound: {sound_file}")
     except Exception as e:
         logging.exception("💥 Failed to play deathless streak sound")
-
 
 
 async def start_heartbeat_loop(bot, guild):
@@ -278,9 +264,6 @@ async def start_heartbeat_loop(bot, guild):
         voice_client = discord.utils.get(bot.voice_clients, guild=guild)
         if voice_client and not voice_client.is_playing():
             try:
-                # source = SimpleAudioSource(silent_path)
-                # voice_client.play(source)
-                
                 enqueue_sound(guild, silent_path)
                 
                 logging.debug("💤 Heartbeat: silent.wav played.")

@@ -1,6 +1,11 @@
 #### 📄 `CHANGELOG.md`
 ```markdown
 
+## v6.2.0 — 2025-05-15
+- 🛠 Fixed a bug where "deathless streaks" were not reset on solo deaths.
+- ➕ Added support for parsing death messages like `X is dead`, which now correctly resets the deathless streak.
+- 💬 Logging improved for solo deaths and edge cases.
+
 ## v6.1.0 — 2025-05-15
 - ✨ **New Feature: Deathless Streaks**
   - The bot now tracks “clean” killstreaks (until first death).

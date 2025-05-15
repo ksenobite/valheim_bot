@@ -91,17 +91,19 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
-    
     channel_id = get_tracking_channel_id()
     if channel_id and message.channel.id == channel_id:
-        match = re.match(r"^(.+?) killed by (.+)$", message.content.strip())
+        content = message.content.strip()
+
+        # --- [1] Standard Kill Check ---
+        match = re.match(r"^(.+?) killed by (.+)$", content)
         if match:
             victim, killer = match.groups()
             killer = killer.strip().lower()
             victim = victim.strip().lower()
             now = datetime.utcnow()
 
-            # --- Regular Killstreaks ---
+            # --- Killstreak ---
             if killer not in killstreaks:
                 killstreaks[killer] = {"count": 1, "last_kill_time": now}
             else:
@@ -119,16 +121,25 @@ async def on_message(message):
             if victim in killstreaks:
                 del killstreaks[victim]
 
-            # --- Save frag ---
             add_frag(killer, victim)
 
-            # --- Update deathless streaks ---
+            # --- Deathless streak logic ---
             new_count = update_deathless_streaks(killer, victim)
             if new_count:
                 await send_deathless_announcement(bot, killer, new_count)
                 await play_deathless_sound(bot, new_count, message.guild)
+
+        # --- [2] Checking for a single death (for example, by nature or suicide) ---
+        elif re.match(r"^(.+?) is dead$", content):
+            victim = re.match(r"^(.+?) is dead$", content).group(1).strip().lower()
+            logging.info(f"💀 '{victim}' died without a killer. Resetting deathless streak.")
+            reset_deathless_streak(victim)
+            if victim in killstreaks:
+                del killstreaks[victim]
+
         else:
-            logging.warning(f"⚠️ Message does not match kill format: {message.content}")
+            logging.warning(f"⚠️ Message does not match known kill format: {content}")
+
 
 # --- Run bot ---
 bot.run(TOKEN)
