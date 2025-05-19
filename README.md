@@ -11,14 +11,15 @@ A feature-rich Discord bot for Valheim PvP communities. Tracks killstreaks, anno
 
 ## 🎨 Features
 - ✅ Automatic kill tracking & killstreak recognition
-- 🔥 **NEW:** Killstreaks system with Dota2-style levels
-- 🔊 Sound announcements with dynamic playback queue
-- 🖼️ Beautiful embed messages with roles, avatars, emojis
+- 🔥 **Killstreaks + Deathless streaks** (Dota2-style multi-level system)
+- 🔊 Sound announcements with **dynamic queue playback**
+- 🖼️ Stylish embeds with **avatars**, **role-colored names**, **emojis**
 - 📊 Player stats: `/stats`, `/top`, `/mystats`, `/whois`
-- 👑 PvP role assignment by weekly win count (fully configurable)
-- ♻️ Auto-role update system with toggle and window configuration
-- 🧱 Standalone executable support (Nuitka + `opus.dll`)
+- 👑 PvP role assignment by weekly win count (**fully configurable**)
+- ♻️ Auto-role system with toggle and rolling window setting
+- 🛠 Full set of admin slash commands
 - 💾 Lightweight SQLite backend
+- 🧱 Works standalone (`main.exe`) via Nuitka + `opus.dll`
 
 ## 🧰 Setup Instructions
 1. **Create `.env`** 

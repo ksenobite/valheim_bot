@@ -17,10 +17,9 @@ from operator import itemgetter
 
 from settings import BOT_VERSION, BACKUP_DIR, get_db_file_path
 from db import *
-from roles import update_roles_for_all_members
-from announcer import start_heartbeat_loop, KILLSTREAK_STYLES, audio_queue_worker
-from utils import require_admin, check_positive, get_winrate_emoji, resolve_display_data
-
+from roles import *
+from announcer import *
+from utils import *
 
 async def show_stats_for_characters(interaction: Interaction, characters: list[str], days: int, public: bool):
     since = datetime.utcnow() - timedelta(days=days)
@@ -68,7 +67,7 @@ async def show_stats_for_characters(interaction: Interaction, characters: list[s
         display_data = await resolve_display_data(opponent, interaction.guild)
         emoji = get_winrate_emoji(winrate)
         embed.add_field(
-            name=f"{emoji} {display_data['display_name'].upper()}",
+            name=f"{emoji} {display_data['display_name']}",
             value=f"Wins: {wins} | Losses: {losses} | Winrate: {winrate:.1f}%",
             inline=False
         )
@@ -319,22 +318,28 @@ def setup_commands(bot: commands.Bot):
         if public and not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
             return
+
         top_stats = get_top_players(count, days)
         if not top_stats:
             await interaction.response.send_message(f"❌ No data for last {days} day(s).", ephemeral=not public)
             return
-        embed = discord.Embed(title=f"🏆 Top {count} players in the last {days} day(s)")
-        # Let's define the embed color based on the role of the first participant
+
         top_name = top_stats[0][0]
         top_display = await resolve_display_data(top_name, interaction.guild)
-        embed.color = top_display.get("color", discord.Color.dark_grey())
+
+        embed = discord.Embed(
+            title=f"🏆 Top {count} players in the last {days} day(s)",
+            color=top_display.get("color", discord.Color.dark_grey())
+        )
+        embed.set_author(name=top_display['display_name'], icon_url=top_display.get('avatar_url') or discord.Embed.Empty)
+
         for i, (character, kills) in enumerate(top_stats, 1):
             display_data = await resolve_display_data(character, interaction.guild)
             line = f"**{i}.** {display_data['display_name']} — `{kills}` kills"
-            if i == 1 and display_data.get("avatar_url"):
-                embed.set_thumbnail(url=display_data["avatar_url"])
             embed.add_field(name="\u200b", value=line, inline=False)
+
         await interaction.response.send_message(embed=embed, ephemeral=not public)
+
 
     @bot.tree.command(name="mystats", description="Show your stats (all linked characters)")
     @app_commands.describe(days="Days", public="Publish?")
@@ -344,13 +349,22 @@ def setup_commands(bot: commands.Bot):
             return
         if not await check_positive(interaction, days=days):
             return
+
         user_id = interaction.user.id
         characters = get_user_characters(user_id)
         if not characters:
             await interaction.response.send_message("❌ You don't have any linked characters.", ephemeral=True)
             return
-        # Use ready-made logic from /stats, but on all characters
-        await show_stats_for_characters(interaction, characters, days, public)
+
+        avatar_url = interaction.user.display_avatar.url
+        embeds = await generate_stats_embeds(interaction, characters, days, avatar_url=avatar_url)
+
+        if len(embeds) == 1:
+            await interaction.response.send_message(embed=embeds[0], ephemeral=not public)
+        else:
+            view = PaginatedStatsView(embeds, ephemeral=not public)
+            await view.send_initial(interaction)
+
 
     @bot.tree.command(name="stats", description="Show player stats")
     @app_commands.describe(player="character_name or @discord_user", days="Days", public="Publish?")
@@ -360,15 +374,26 @@ def setup_commands(bot: commands.Bot):
             return
         if not await check_positive(interaction, days=days):
             return
-        if match := re.match(r"<@!?(\d+)>", player):  # Is this a user mention?
+
+        avatar_url = None
+        if match := re.match(r"<@!?(\d+)>", player):  # Mention
             user_id = int(match.group(1))
             characters = get_user_characters(user_id)
             if not characters:
                 await interaction.response.send_message("❌ No characters linked to this user.", ephemeral=True)
                 return
-            await show_stats_for_characters(interaction, characters, days, public)
+            user = await bot.fetch_user(user_id)
+            avatar_url = user.display_avatar.url
         else:
-            await show_stats_for_characters(interaction, [player.lower()], days, public)
+            characters = [player.lower()]
+
+        embeds = await generate_stats_embeds(interaction, characters, days, avatar_url=avatar_url)
+        if len(embeds) == 1:
+            await interaction.response.send_message(embed=embeds[0], ephemeral=not public)
+        else:
+            view = PaginatedStatsView(embeds, ephemeral=not public)
+            await view.send_initial(interaction)
+
 
     @bot.tree.command(name="whois", description="Show the character's owner")
     @app_commands.describe(character="Character's name")
@@ -380,6 +405,7 @@ def setup_commands(bot: commands.Bot):
             await interaction.response.send_message(f"🎮 The character **{character}** belongs to {user.mention}.", ephemeral=True)
         else:
             await interaction.response.send_message(f"❌ The character **{character}** is not linked to any user.", ephemeral=True)
+
 
     @bot.tree.command(name="roles", description="Show the current rank role configuration")
     @app_commands.describe(public="Publish result to channel?")

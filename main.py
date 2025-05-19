@@ -25,8 +25,8 @@ from announcer import (
 )
 from settings import BOT_VERSION, get_env_path, get_db_file_path, get_sounds_path
 
-
 # --- Logging ---
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname).1s | %(message)s",
@@ -38,6 +38,7 @@ logging.basicConfig(
 )
 
 # --- Check Opus ---
+
 if not discord.opus.is_loaded():
     dll_path = os.path.join(os.path.dirname(__file__), "opus.dll")
     discord.opus.load_opus(dll_path)

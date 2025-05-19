@@ -1,6 +1,14 @@
 #### 📄 `CHANGELOG.md`
 ```markdown
 
+## v6.3.0 — 2025-05-16
+- 🖼️ Redesigned `/stats` and `/mystats`:
+  - Avatars, role-colored usernames, and emojis are now shown in embeds.
+  - Pagination added for long lists via interactive buttons.
+  - Displayed stats are now more readable and informative.
+- 🐛 Fixed interaction issues (`InteractionResponded`) during pagination.
+- 🔁 Updated `PaginatedStatsView` to support user-friendly navigation and footer page numbering.
+
 ## v6.2.0 — 2025-05-15
 - 🛠 Fixed a bug where "deathless streaks" were not reset on solo deaths.
 - ➕ Added support for parsing death messages like `X is dead`, which now correctly resets the deathless streak.
