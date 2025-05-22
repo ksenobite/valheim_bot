@@ -46,7 +46,7 @@ def init_db():
 
         c.execute("""CREATE TABLE IF NOT EXISTS deathless_streaks (
             character TEXT PRIMARY KEY,
-            streak INTEGER NOT NULL
+            count INTEGER NOT NULL
         )""")
 
         conn.commit()
@@ -270,7 +270,6 @@ def reset_deathless_streak(character: str):
             ON CONFLICT(character) DO UPDATE SET count = 0
         """, (character.lower(),))
 
-
 def update_deathless_streaks(killer: str, victim: str) -> int:
     """
     Updates the deathless streak for the killer and resets the victim's streak.
@@ -283,15 +282,15 @@ def update_deathless_streaks(killer: str, victim: str) -> int:
         c.execute("DELETE FROM deathless_streaks WHERE character = ?", (victim,))
 
         # Get current killer streak
-        c.execute("SELECT streak FROM deathless_streaks WHERE character = ?", (killer,))
+        c.execute("SELECT count FROM deathless_streaks WHERE character = ?", (killer,))
         row = c.fetchone()
 
         if row:
             new_streak = row[0] + 1
-            c.execute("UPDATE deathless_streaks SET streak = ? WHERE character = ?", (new_streak, killer))
+            c.execute("UPDATE deathless_streaks SET count = ? WHERE character = ?", (new_streak, killer))
         else:
             new_streak = 1
-            c.execute("INSERT INTO deathless_streaks (character, streak) VALUES (?, ?)", (killer, new_streak))
+            c.execute("INSERT INTO deathless_streaks (character, count) VALUES (?, ?)", (killer, new_streak))
 
         conn.commit()
         return new_streak

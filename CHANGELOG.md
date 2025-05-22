@@ -1,6 +1,20 @@
 #### 📄 `CHANGELOG.md`
 ```markdown
 
+## v6.4.0 — 2025-05-22
+- 📌 Improved `/whois` command:
+  - Now supports both character names and user mentions (@user).
+  - Shows who owns a character, or which characters are linked to a user.
+  - Includes avatars and beautiful embed formatting.
+
+- 🐛 Bugfixes:
+  - Fixed error when fetching character owners with invalid Discord IDs.
+  - Resolved edge case where empty or unlinked inputs caused silent failures.
+
+- 🎨 Design Enhancements:
+  - Embed output now includes avatars and structured layout for better readability.
+  - Emoji icons for linked characters and owners add visual clarity.
+
 ## v6.3.0 — 2025-05-16
 - 🖼️ Redesigned `/stats` and `/mystats`:
   - Avatars, role-colored usernames, and emojis are now shown in embeds.

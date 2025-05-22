@@ -90,6 +90,7 @@ async def on_ready():
     except Exception as e:
         logging.error(f"❌ Failed to sync commands: {e}")
 
+
 @bot.event
 async def on_message(message):
     channel_id = get_tracking_channel_id()
@@ -131,15 +132,20 @@ async def on_message(message):
                 await play_deathless_sound(bot, new_count, message.guild)
 
         # --- [2] Checking for a single death (for example, by nature or suicide) ---
-        elif re.match(r"^(.+?) is dead$", content):
-            victim = re.match(r"^(.+?) is dead$", content).group(1).strip().lower()
-            logging.info(f"💀 '{victim}' died without a killer. Resetting deathless streak.")
-            reset_deathless_streak(victim)
-            if victim in killstreaks:
-                del killstreaks[victim]
-
+        elif (match := re.match(r"^(.+?) is dead$", content)):
+            victim = match.group(1).strip().lower()
+            if victim:
+                logging.info(f"💀 '{victim}' died without a killer. Resetting deathless streak.")
+                try:
+                    reset_deathless_streak(victim)
+                except Exception as e:
+                    logging.exception(f"❌ Failed to reset deathless streak for '{victim}': {e}")
+                if victim in killstreaks:
+                    del killstreaks[victim]
+            else:
+                logging.warning(f"⚠️ Death message matched, but victim name is empty: {content}")
         else:
-            logging.warning(f"⚠️ Message does not match known kill format: {content}")
+            logging.warning(f"⚠️  Message does not match known kill format: {content}")
 
 
 # --- Run bot ---
