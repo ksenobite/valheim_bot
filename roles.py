@@ -68,12 +68,12 @@ async def update_roles_for_all_members(bot: discord.Client, days: int = 7):
     for guild in bot.guilds:
         logging.info(f"🔁 Updating roles in guild: {guild.name}")
         for member in guild.members:
-            logging.info(f"🔍 Проверка участника: {member.display_name} ({member.id})")
+            logging.info(f"🔍 Participant verification: {member.display_name} ({member.id})")
             if member.bot:
                 continue
             characters = get_user_characters(member.id)
             if not characters:
-                logging.info("⛔ Нет привязанных персонажей — пропуск.")
+                logging.info("⛔ There are no linked characters.")
                 continue
-            logging.info(f"✅ Найдено персонажей: {characters}")
+            logging.info(f"✅ Characters found: {characters}")
             await assign_role_based_on_wins(member, days=days)

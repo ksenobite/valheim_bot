@@ -294,3 +294,11 @@ def update_deathless_streaks(killer: str, victim: str) -> int:
 
         conn.commit()
         return new_streak
+
+def clear_deathless_streaks():
+    """Deletes all entries from the deathless_streaks table at startup."""
+    with sqlite3.connect(get_db_file_path()) as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM deathless_streaks")
+        conn.commit()
+        logging.info("🧹 Cleared deathless_streaks table on startup.")

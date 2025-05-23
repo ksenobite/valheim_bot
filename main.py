@@ -14,16 +14,10 @@ from dotenv import load_dotenv
 from datetime import datetime
 from discord.ext import commands
 
+from settings import BOT_VERSION, get_env_path, get_db_file_path, get_sounds_path
 from commands import setup_commands
 from db import *
-from announcer import (
-    set_sounds_path,
-    send_killstreak_announcement,
-    send_deathless_announcement,
-    play_killstreak_sound,
-    play_deathless_sound,
-)
-from settings import BOT_VERSION, get_env_path, get_db_file_path, get_sounds_path
+from announcer import *
 
 # --- Logging ---
 
@@ -42,7 +36,6 @@ logging.basicConfig(
 if not discord.opus.is_loaded():
     dll_path = os.path.join(os.path.dirname(__file__), "opus.dll")
     discord.opus.load_opus(dll_path)
-
 if discord.opus.is_loaded():
     logging.info("🎧 Opus successfully loaded.")
 else:
@@ -60,10 +53,13 @@ setup_commands(bot)  # 👈 registering the commands
 
 set_db_path(get_db_file_path())
 set_sounds_path(get_sounds_path())
+
 init_db()
 init_rank_roles_table()
 
-# --- Load .env ---
+clear_deathless_streaks()
+
+# --- Load Token .env ---
 
 env_path = get_env_path()
 if not os.path.exists(env_path):
@@ -71,11 +67,12 @@ if not os.path.exists(env_path):
     sys.exit(1)
 else:
     load_dotenv(dotenv_path=env_path)
-
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     logging.error("❌ DISCORD_TOKEN is missing from .env")
     sys.exit(1)
+    
+# --- Killstreaks ---
 
 killstreaks = {}
 KILLSTREAK_TIMEOUT = int(get_setting("killstreak_timeout") or 15)

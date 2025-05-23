@@ -21,7 +21,6 @@ from roles import *
 from announcer import *
 from utils import *
 
-
 # --- Admin commands ---
 
 def setup_commands(bot: commands.Bot):
