@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+# commands.py
+
 from datetime import datetime, timedelta
 
 import os
@@ -44,6 +46,7 @@ def setup_commands(bot: commands.Bot):
             else:
                 await interaction.response.send_message("⚠️ Tracking channel is not set.", ephemeral=True)
 
+
     @bot.tree.command(name="announce", description="Show or set the announce channel")
     @app_commands.describe(channel="Channel")
     async def announce(interaction: Interaction, channel: discord.TextChannel = None):
@@ -62,6 +65,7 @@ def setup_commands(bot: commands.Bot):
                     await interaction.response.send_message("❗ Announce channel not found.", ephemeral=True)
             else:
                 await interaction.response.send_message("⚠️ Announce channel is not set.", ephemeral=True)
+
 
     @bot.tree.command(name="killstreaktimeout", description="Show or set the killstreak timeout (in seconds)")
     @app_commands.describe(seconds="New timeout value in seconds")
@@ -83,6 +87,7 @@ def setup_commands(bot: commands.Bot):
             else:
                 await interaction.response.send_message("❗ Killstreak timeout is not set. Default: 15 seconds.", ephemeral=True)
 
+
     @bot.tree.command(name="link", description="Link a game character to a Discord user")
     @app_commands.describe(character="Character's name", user="Discord User")
     async def link(interaction: Interaction, character: str, user: discord.Member):
@@ -91,6 +96,7 @@ def setup_commands(bot: commands.Bot):
         character = character.lower()
         set_character_owner(character, user.id)
         await interaction.response.send_message(f"✅ The character **{character}** is linked to {user.mention}.", ephemeral=True)
+
 
     @bot.tree.command(name="unlink", description="Remove the connection between the character and the user")
     @app_commands.describe(character="Character's name")
@@ -104,6 +110,7 @@ def setup_commands(bot: commands.Bot):
         else:
             await interaction.response.send_message(f"❌ The character **{character}** was not attached.", ephemeral=True)
 
+
     @bot.tree.command(name="roleset", description="Set a rank role for a win threshold")
     @describe(wins="Minimum number of wins for the role", role="Discord role to assign")
     async def roleet(interaction: Interaction, wins: int, role: discord.Role):
@@ -115,15 +122,16 @@ def setup_commands(bot: commands.Bot):
         set_rank_role(wins, role.name)
         await interaction.response.send_message(f"✅ Rank **{role.name}** set for `{wins}`+ wins.", ephemeral=True)
 
+
     @bot.tree.command(name="roleupdate", description="Force role update for all members")
     async def roleupdate(interaction: discord.Interaction):
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
             return
-
         await interaction.response.defer(thinking=True, ephemeral=True)  # <- an important fix
         await update_roles_for_all_members(interaction.client)
         await interaction.followup.send("✅ Roles updated.")
+
 
     @bot.tree.command(name="roleclear", description="Clear all configured rank roles")
     async def rankclear(interaction: Interaction):
@@ -131,6 +139,7 @@ def setup_commands(bot: commands.Bot):
             return
         clear_rank_roles()
         await interaction.response.send_message("🗑️ All rank roles have been cleared.", ephemeral=True)
+
 
     @bot.tree.command(name="autoroles", description="Enable or disable automatic role assignment")
     @app_commands.describe(enabled="Enable or disable (true/false)")
@@ -141,6 +150,7 @@ def setup_commands(bot: commands.Bot):
         status = "enabled" if enabled else "disabled"
         await interaction.response.send_message(f"✅ Auto-role assignment **{status}**.", ephemeral=True)
 
+
     @bot.tree.command(name="autorolestatus", description="Show the current auto-role update setting")
     async def autorolestatus(interaction: Interaction):
         if not await require_admin(interaction):
@@ -149,6 +159,7 @@ def setup_commands(bot: commands.Bot):
         days = get_auto_role_update_days()
         status = "✅ Enabled" if enabled else "❌ Disabled"
         await interaction.response.send_message(f"{status}\nInterval: `{days}` day(s)", ephemeral=True)
+
 
     @bot.tree.command(name="autoroletimeout", description="Set the time window for auto-role updates")
     @app_commands.describe(days="Number of days to consider")
@@ -161,15 +172,113 @@ def setup_commands(bot: commands.Bot):
         set_auto_role_update_days(days)
         await interaction.response.send_message(f"✅ Auto-update interval set to `{days}` day(s).", ephemeral=True)
 
+
+    @bot.tree.command(name="points", description="Admin: manual control of players' points")
+    @app_commands.describe(
+        target="Character or @user",
+        amount="Number of points to add (or subtract)",
+        reason="Optional reason"
+    )
+    async def points(interaction: Interaction, target: str, amount: int, reason: str = "Manual adjustment"):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        # We determine who we are correcting
+        if match := re.match(r"<@!?(\d+)>", target):  # if @user
+            user_id = int(match.group(1))
+            characters = get_user_characters(user_id)
+            if not characters:
+                await interaction.followup.send("❌ This user does not have any attached characters.", ephemeral=True)
+                return
+        else:
+            characters = [target.lower()]
+
+        # Making adjustments for each character
+        for character in characters:
+            adjust_wins(character, amount, reason)
+
+        # ✅ Response
+        char_list = "\n".join(f"- `{char}`" for char in characters)
+        
+        embed = discord.Embed(
+            title="✅ Manual Points Adjustment",
+            color=discord.Color.orange(),
+            timestamp=datetime.utcnow()
+        )
+        embed.add_field(name="Characters", value=char_list, inline=False)
+        embed.add_field(name="Amount", value=f"`{amount:+}`", inline=True)
+        embed.add_field(name="Reason", value=reason or "—", inline=True)
+        embed.set_footer(text=f"Changed by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        
+
+    @bot.tree.command(name="pointlog", description="Show manual adjustment history")
+    @app_commands.describe(target="Character name or @user")
+    async def pointlog(interaction: Interaction, target: str):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("⚠️ Admins only.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        # Get characters
+        if match := re.match(r"<@!?(\d+)>", target):
+            user_id = int(match.group(1))
+            characters = get_user_characters(user_id)
+            if not characters:
+                await interaction.followup.send("❌ This user has no linked characters.", ephemeral=True)
+                return
+        else:
+            characters = [target.lower()]
+
+        # Collecting the history of adjustments
+        with sqlite3.connect(get_db_file_path()) as conn:
+            c = conn.cursor()
+            placeholders = ",".join("?" for _ in characters)
+            query = f"""
+                SELECT character, adjustment, reason, timestamp
+                FROM manual_adjustments
+                WHERE character IN ({placeholders})
+                ORDER BY timestamp DESC
+                LIMIT 20
+            """
+            c.execute(query, characters)
+            rows = c.fetchall()
+
+        if not rows:
+            await interaction.followup.send("ℹ️ No points adjustments found.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title="📜 Points History",
+            color=discord.Color.teal(),
+            timestamp=datetime.utcnow()
+        )
+        grouped = {}
+        for char, delta, reason, ts in rows:
+            ts_fmt = datetime.fromisoformat(ts).strftime("%Y-%m-%d %H:%M")
+            line = f"`{delta:+}` | _{reason}_ ({ts_fmt})"
+            grouped.setdefault(char, []).append(line)
+
+        for char, changes in grouped.items():
+            value = "\n".join(changes)
+            embed.add_field(name=f"🧍 {char}", value=value, inline=False)
+
+        embed.set_footer(text="Most recent 20 changes")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+
     @bot.tree.command(name="voice", description="Join or leave a voice channel")
     @app_commands.describe(leave="Set True to leave the voice channel")
     async def voice(interaction: discord.Interaction, leave: bool = False):
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
             return
-
         await interaction.response.defer(thinking=True, ephemeral=True) 
-
         if leave:
             if interaction.guild.voice_client:
                 await interaction.guild.voice_client.disconnect()
@@ -206,6 +315,7 @@ def setup_commands(bot: commands.Bot):
         else:
             current_style = get_announce_style()
             await interaction.response.send_message(f"✅ Current announce style is **{current_style}**.", ephemeral=True)
+
 
     @bot.tree.command(name="reset", description="Reset the database or restore from backup")
     @app_commands.describe(backup="Name of the backup file to restore (optional)")
@@ -248,42 +358,72 @@ def setup_commands(bot: commands.Bot):
             logging.info(f"✅ Database restored from backup {backup}")
 
 # --- User Commands ---
-    
-    @bot.tree.command(name="top", description="Top players by frags")
+
+    @bot.tree.command(name="top", description="Top players by total points (frags + adjustments)")
     @app_commands.describe(count="Number of top players", days="Days", public="Publish?")
-    async def top(interaction: Interaction, count: int = 5, days: int = 1, public: bool = False):
+    async def top(interaction: Interaction, count: int = 10, days: int = 1, public: bool = False):
         if not await check_positive(interaction, count=count, days=days):
             return
         if public and not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
             return
-        # ✅ Protection from Unknown Interaction error
+
         await interaction.response.defer(thinking=True, ephemeral=not public)
-        top_stats = get_top_players(count, days)
-        if not top_stats:
+
+        # Collect all the killers for the period
+        since = datetime.utcnow() - timedelta(days=days)
+        with sqlite3.connect(get_db_path()) as conn:
+            c = conn.cursor()
+            c.execute("""
+                SELECT killer, COUNT(*) as count FROM frags
+                WHERE timestamp >= ?
+                GROUP BY killer
+            """, (since,))
+            raw_stats = c.fetchall()
+
+        # Calculating the final points (frags + adjustments)
+        totals = []
+        for character, frags in raw_stats:
+            manual, _ = get_win_sources(character)  # The function already gives manual and natural
+            total = frags + manual
+            totals.append((character, frags, manual, total))
+
+        # Sort by total_points
+        sorted_stats = sorted(totals, key=lambda x: x[3], reverse=True)[:count]
+        if not sorted_stats:
             await interaction.followup.send(f"❌ No data for last {days} day(s).", ephemeral=not public)
             return
+
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
         embeds = []
-        # Extract info about top-1 player for author/thumbnail
-        top_name = top_stats[0][0]
+
+        top_name = sorted_stats[0][0]
         top_display = await resolve_display_data(top_name, interaction.guild)
         author_text = f"🏆 Top {count} players in the last {days} day(s)"
-        # Pagination: group every 10 entries per page
         page_size = 10
-        for start in range(0, len(top_stats), page_size):
-            embed = discord.Embed(
-                color=top_display.get("color", discord.Color.dark_grey())
-            )
+
+        for start in range(0, len(sorted_stats), page_size):
+            embed = discord.Embed(color=top_display.get("color", discord.Color.dark_grey()))
             embed.set_author(name=author_text)
             if top_display.get("avatar_url"):
                 embed.set_thumbnail(url=top_display["avatar_url"])
-            for i, (character, kills) in enumerate(top_stats[start:start+page_size], start + 1):
+
+            for i, (character, frags, manual, total) in enumerate(sorted_stats[start:start+page_size], start + 1):
                 display_data = await resolve_display_data(character, interaction.guild)
                 medal = medals.get(i, "")
-                line = f"**{i}.** {medal} {display_data['display_name']}: `{kills}`"
-                embed.add_field(name="\u200b", value=line, inline=False)
+                line = f"Points:`{total}`\tFrags:`{frags}`\tExtra:`{manual}`"
+                embed.add_field(
+                    name=f"**{i}. {medal} {display_data['display_name'].upper()}**",
+                    value=line,
+                    inline=False
+                )
+
             embeds.append(embed)
+
+        if not embeds:
+            await interaction.followup.send("❌ No stats available for the selected timeframe.", ephemeral=not public)
+            return
+        
         if len(embeds) == 1:
             await interaction.followup.send(embed=embeds[0], ephemeral=not public)
         else:
@@ -308,11 +448,16 @@ def setup_commands(bot: commands.Bot):
         await interaction.response.defer(thinking=True, ephemeral=not public)
         avatar_url = interaction.user.display_avatar.url
         embeds = await generate_stats_embeds(interaction, characters, days, avatar_url=avatar_url)
+        
+        if not embeds:
+            await interaction.followup.send("❌ No stats available for this player.", ephemeral=not public)
+            return
+        
         if len(embeds) == 1:
             await interaction.followup.send(embed=embeds[0], ephemeral=not public)
         else:
             view = PaginatedStatsView(embeds, ephemeral=not public)
-        await view.send_initial(interaction)
+            await view.send_initial(interaction)
     
     
     @bot.tree.command(name="stats", description="Show player stats")
@@ -341,6 +486,11 @@ def setup_commands(bot: commands.Bot):
         else:
             characters = [player.lower()]
         embeds = await generate_stats_embeds(interaction, characters, days, avatar_url=avatar_url)
+        
+        if not embeds:
+            await interaction.followup.send("❌ No stats available for this player.", ephemeral=not public)
+            return
+        
         if len(embeds) == 1:
             await interaction.followup.send(embed=embeds[0], ephemeral=not public)
         else:
@@ -423,14 +573,22 @@ def setup_commands(bot: commands.Bot):
             color=discord.Color.purple(),
             timestamp=datetime.utcnow()
         )
-
         if interaction.user.guild_permissions.administrator:
             embed.add_field(
-                name="__🔧 Admin Commands:__",
+                name="__🔧 Admin Commands (1/2):__",
                 value=(
                     "⚙️ `/track` `[channel]` — Show or set the tracking channel\n\n"
                     "📢 `/announce` `[channel]` — Show or set the announce channel\n\n"
                     "⏳ `/killstreaktimeout` `[seconds]` — Show or set the killstreak timeout (default 15)\n\n"
+                    "🔊 `/voice` `[leave]` — Add or remove bot from voice channel\n\n"
+                    "🎨 `/style` `[style]` — Show or set the announce style\n\n"
+                    "🔁 `/reset` `[filename]` — Reset or restore database from backup\n\n"
+                ),
+                inline=False
+            )
+            embed.add_field(
+                name="__🔧 Admin Commands (2/2):__",
+                value=(
                     "🔗 `/link` `[character]` `[@user]` — Link a character to a user\n\n"
                     "❌ `/unlink` `[character]` — Unlink a character\n\n"
                     "🥇 `/roleset` `[wins]` `[role]` — Set rank role for win threshold\n\n"
@@ -439,9 +597,8 @@ def setup_commands(bot: commands.Bot):
                     "⚙️ `/autoroles` `[on/off]` — Enable or disable auto role updates\n\n"
                     "📊 `/autorolestatus` — Show the current auto-role update setting\n\n"
                     "📆 `/autoroletimeout` `[days]` — Set time window (in days) for role calculation\n\n"
-                    "🔊 `/voice` `[leave]` — Add or remove bot from voice channel\n\n"
-                    "🎨 `/style` `[style]` — Show or set the announce style\n\n"
-                    "🔁 `/reset` `[filename]` — Reset or restore database from backup\n\n"
+                    "🧮 `/points` `[character/@user]` `[amount]` `[reason]` — Adjust players points manually\n\n"
+                    "📜 `/pointlog` `[character/@user]` — Show manual adjustment history\n\n"
                 ),
                 inline=False
             )
@@ -457,6 +614,5 @@ def setup_commands(bot: commands.Bot):
             ),
             inline=False
         )
-
         embed.set_footer(text=f"Bot version {BOT_VERSION}")
         await interaction.response.send_message(embed=embed, ephemeral=True)

@@ -1,6 +1,38 @@
 #### 📄 `CHANGELOG.md`
 ```markdown
 
+## v6.5.0 — 2025-05-26–27
+- ➕ New command: `/points`
+  - Allows admins to manually add or subtract points (wins) from characters or users.
+  - Supports flexible adjustments with reason logging for transparency.
+  - Accepts both character names and user mentions.
+
+- ➕ New command: `/pointlog`
+  - Shows history of manual adjustments for a user or character.
+  - Displays reason, timestamp, and point delta.
+  - Supports both character names and @user mentions.
+
+- 📊 Stats & Rankings:
+  - `/top`, `/stats`, and `/mystats` now display total points: frags + extrapoints.
+  - `/top` is now sorted by **total points**, not just raw frags.
+  - `/stats` and `/mystats` now show detailed stats vs opponents:
+    - Wins, losses, winrate %, and new **win/loss ratio** (`winlos`).
+    - Emoji-based rating indicators based on winrate.
+  - Added protection against division by zero (e.g. when losses = 0).
+  - Now shows summary totals including total wins/losses, winrate %, and extra points.
+
+- 👑 Role system:
+  - `/roleupdate` now assigns roles based on **total points**, including manual adjustments.
+  - Users with negative point totals now receive the 0-point role (e.g. “Покончил с PvP”).
+
+- 🔧 UX Improvements:
+  - `/mystats` and `/stats` now handle pagination and edge cases more gracefully.
+  - Improved error handling for characters without Discord owners.
+
+- 🛠️ Internal refactoring:
+  - Introduced `get_total_wins()` and `get_win_sources()` for consistent point calculations.
+  - `generate_stats_embeds()` updated with proper pagination guards and async UI logic.
+
 ## v6.4.0 — 2025-05-22
 - 📌 Improved `/whois` command:
   - Now supports both character names and user mentions (@user).

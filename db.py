@@ -8,9 +8,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from settings import get_db_file_path
 
-
 DB_FILE = None
-
 
 def set_db_path(path):
     global DB_FILE
@@ -26,7 +24,8 @@ def init_db():
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
 
-        # Basic tables
+        # --- Basic tables ---
+        
         c.execute("""CREATE TABLE IF NOT EXISTS frags (
             id INTEGER PRIMARY KEY,
             killer TEXT,
@@ -48,6 +47,13 @@ def init_db():
             character TEXT PRIMARY KEY,
             count INTEGER NOT NULL
         )""")
+        
+        c.execute("""CREATE TABLE IF NOT EXISTS manual_adjustments (
+            character TEXT NOT NULL,
+            adjustment INTEGER NOT NULL,
+            reason TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""")
 
         conn.commit()
 
@@ -66,9 +72,7 @@ def set_setting(key, value):
         c.execute("REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
         conn.commit()
 
-
 # --- Announce ---
-
 
 def get_tracking_channel_id():
     val = get_setting("tracking_channel_id")
@@ -88,9 +92,7 @@ def get_announce_style():
 def set_announce_style(style_name):
     set_setting("announce_style", style_name)
 
-
 # --- Stats ---
-
 
 def add_frag(killer, victim):
     now = datetime.utcnow()
@@ -104,7 +106,7 @@ def add_frag(killer, victim):
         logging.error(f"❌ Error when adding a frag: {e}")
 
 
-def get_top_players(n=5, days=1):
+def get_top_players(n=10, days=1):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         since = datetime.utcnow() - timedelta(days=days)
@@ -117,9 +119,7 @@ def get_top_players(n=5, days=1):
         """, (since, n))
         return c.fetchall()
 
-
 # --- Linking ---
-
 
 def link_character(character: str, discord_id: int):
     with sqlite3.connect(get_db_path()) as conn:
@@ -170,7 +170,9 @@ def remove_character_owner(character: str) -> bool:
 
 
 def get_discord_id_by_character(character_name: str) -> Optional[int]:
-    """Возвращает Discord ID, связанный с персонажем, или None если связки нет."""
+    """
+    Returns the Discord ID associated with the character, or None if there is no bundle.
+    """
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
         c.execute("SELECT discord_id FROM character_map WHERE character = ?", (character_name.lower(),))
@@ -234,11 +236,12 @@ def get_auto_role_update_days(default: int = 7) -> int:
 def set_auto_role_update_days(days: int):
     set_setting("auto_role_update_days", str(days))
 
-
 # --- 💀 Deathstreaks ---
 
 def get_deathless_streak(character: str) -> int:
-    """Возвращает текущую 'чистую' серию побед персонажа."""
+    """
+    Returns the character's current 'clean' win streak.
+    """
     with sqlite3.connect(get_db_file_path()) as conn:
         c = conn.cursor()
         c.execute("SELECT count FROM deathless_streaks WHERE character = ?", (character.lower(),))
@@ -247,7 +250,9 @@ def get_deathless_streak(character: str) -> int:
 
 
 def increment_deathless_streak(character: str) -> int:
-    """Увеличивает серию на 1 и возвращает новое значение."""
+    """
+    Increases the series by 1 and returns a new value.
+    """
     current = get_deathless_streak(character)
     new_value = current + 1
     with sqlite3.connect(get_db_file_path()) as conn:
@@ -261,7 +266,9 @@ def increment_deathless_streak(character: str) -> int:
 
 
 def reset_deathless_streak(character: str):
-    """Сбрасывает серию до 0."""
+    """
+    Resets the series to 0.
+    """
     with sqlite3.connect(get_db_file_path()) as conn:
         c = conn.cursor()
         c.execute("""
@@ -269,6 +276,7 @@ def reset_deathless_streak(character: str):
             VALUES (?, 0)
             ON CONFLICT(character) DO UPDATE SET count = 0
         """, (character.lower(),))
+
 
 def update_deathless_streaks(killer: str, victim: str) -> int:
     """
@@ -295,10 +303,78 @@ def update_deathless_streaks(killer: str, victim: str) -> int:
         conn.commit()
         return new_streak
 
+
 def clear_deathless_streaks():
-    """Deletes all entries from the deathless_streaks table at startup."""
+    """
+    Deletes all entries from the deathless_streaks table at startup.
+    """
     with sqlite3.connect(get_db_file_path()) as conn:
         c = conn.cursor()
         c.execute("DELETE FROM deathless_streaks")
         conn.commit()
         logging.info("🧹 Cleared deathless_streaks table on startup.")
+
+# --- Adjustment ---
+
+def get_total_wins(character: str, days: int = 7) -> int:
+    """
+    Counts the total number of wins in N days, taking into account manual adjustments.
+    """
+    since = datetime.utcnow() - timedelta(days=days)
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        
+        # Fragment wins
+        c.execute("""
+            SELECT COUNT(*) FROM frags
+            WHERE killer = ? AND timestamp >= ?
+        """, (character.lower(), since))
+        frag_wins = c.fetchone()[0] or 0
+
+        # Manual adjustments
+        c.execute("""
+            SELECT SUM(adjustment) FROM manual_adjustments
+            WHERE character = ? AND timestamp >= ?
+        """, (character.lower(), since))
+        manual_delta = c.fetchone()[0] or 0
+
+        return frag_wins + manual_delta
+
+    
+def get_total_wins_for_user(discord_id: int) -> int:
+    """
+    Returns the total points of all the user's characters (frags + adjustments).
+    """
+    total = 0
+    for character in get_user_characters(discord_id):
+        total += get_total_wins(character)
+    return total
+
+
+def adjust_wins(character: str, delta: int, reason: Optional[str] = None):
+    """
+    Adds a victory adjustment to manual_adjustments.
+    """
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO manual_adjustments (character, adjustment, reason)
+            VALUES (?, ?, ?)
+        """, (character.lower(), delta, reason))
+        conn.commit()
+        logging.info(f"✏️\tManual win adjustment: {character} -> {delta} ({reason})")
+
+
+def get_win_sources(character: str) -> tuple[int, int]:
+    """
+    Returns a tuple of (manual, natural) wins.
+    """
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute("SELECT SUM(adjustment) FROM manual_adjustments WHERE character = ?", (character.lower(),))
+        manual = c.fetchone()[0] or 0
+
+        c.execute("SELECT COUNT(*) FROM frags WHERE killer = ?", (character.lower(),))
+        natural = c.fetchone()[0] or 0
+
+        return manual, natural

@@ -14,9 +14,9 @@ from dotenv import load_dotenv
 from datetime import datetime
 from discord.ext import commands
 
-from settings import BOT_VERSION, get_env_path, get_db_file_path, get_sounds_path
-from commands import setup_commands
+from settings import *
 from db import *
+from commands import *
 from announcer import *
 
 # --- Logging ---
@@ -31,7 +31,7 @@ logging.basicConfig(
     ]
 )
 
-# --- Check Opus ---
+# --- Opus ---
 
 if not discord.opus.is_loaded():
     dll_path = os.path.join(os.path.dirname(__file__), "opus.dll")
@@ -41,7 +41,7 @@ if discord.opus.is_loaded():
 else:
     logging.error("❌ Opus failed to load.")
 
-# --- Bot Initialization ---
+# --- Bot Init ---
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -59,7 +59,7 @@ init_rank_roles_table()
 
 clear_deathless_streaks()
 
-# --- Load Token .env ---
+# --- Token ---
 
 env_path = get_env_path()
 if not os.path.exists(env_path):

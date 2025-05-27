@@ -15,9 +15,11 @@ A feature-rich Discord bot for Valheim PvP communities. Tracks killstreaks, anno
 - 🔊 Sound announcements with **dynamic queue playback**
 - 🖼️ Stylish embeds with **avatars**, **role-colored names**, **emojis**
 - 📊 Player stats: `/stats`, `/top`, `/mystats`, `/whois`
+- 📈 Winrate & W/L ratio calculation vs each opponent
+- 🏅 Total points = kills + extra adjustments (manual rewards or penalties)
 - 👑 PvP role assignment by weekly win count (**fully configurable**)
 - ♻️ Auto-role system with toggle and rolling window setting
-- 🛠 Full set of admin slash commands
+- 🧰 Admin control panel: set roles, link characters, adjust scores
 - 💾 Lightweight SQLite backend
 - 🧱 Works standalone (`main.exe`) via Nuitka + `opus.dll`
 
@@ -58,9 +60,13 @@ Run build.bat. It will:
 Into the output directory next to `main.exe`
 
 ## 👑 **Role System**
-Roles are assigned automatically based on player performance:
-Update roles with /forceroleupdate or schedule it programmatically.
-💡 The victory role system has been updated and can now work with any existing roles on your discord server.
+Roles are assigned automatically based on **total points** (natural frags + manual adjustments).  
+The system supports flexible configuration via `/roleset`, `/roleupdate`, and `/autoroles`.
+
+- 🧠 Adjust roles weekly or on demand
+- ✍️ Define any custom role names and thresholds
+- 🧾 View or clear current role config anytime
+- ❄️ Even players with **negative scores** will be assigned the lowest rank
 
 ## 🎭 **Authors**
 - Development: @ksn

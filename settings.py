@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 
+# settings.py
+
 import os
 
-BOT_VERSION = "6.4.1"
+BOT_VERSION = "6.5.0"
 BACKUP_DIR = 'db_backups'
 
 def get_base_dir():
