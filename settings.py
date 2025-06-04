@@ -3,12 +3,12 @@
 # settings.py
 
 import os
+import sys
 
-BOT_VERSION = "6.5.0"
+BOT_VERSION = "7.0.0"
 BACKUP_DIR = 'db_backups'
 
 def get_base_dir():
-    import os, sys
     return os.path.dirname(os.path.abspath(sys.argv[0]))
 
 def get_env_path():

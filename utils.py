@@ -16,6 +16,7 @@ from settings import get_db_file_path
 
 
 class PaginatedStatsView(discord.ui.View):
+    
     def __init__(self, embeds, ephemeral: bool):
         super().__init__(timeout=120)
         self.embeds = embeds
@@ -29,13 +30,15 @@ class PaginatedStatsView(discord.ui.View):
     async def prev(self, interaction: Interaction, button: discord.ui.Button):
         if self.index > 0:
             self.index -= 1
-            await interaction.edit_original_response(embed=self.embeds[self.index], view=self)
+            # await interaction.edit_original_response(embed=self.embeds[self.index], view=self)
+            await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
 
     @discord.ui.button(label="Next ⏩", style=discord.ButtonStyle.grey)
     async def next(self, interaction: Interaction, button: discord.ui.Button):
         if self.index < len(self.embeds) - 1:
             self.index += 1
-            await interaction.edit_original_response(embed=self.embeds[self.index], view=self)
+            # await interaction.edit_original_response(embed=self.embeds[self.index], view=self)
+            await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
 
 
 def get_winrate_emoji(winrate: float) -> str:
@@ -108,7 +111,8 @@ async def resolve_display_data(character_name: str, guild: discord.Guild) -> dic
     }
 
 
-async def generate_stats_embeds(interaction: discord.Interaction, characters: list[str], days: int, avatar_url=None):
+# async def generate_stats_embeds(interaction: discord.Interaction, characters: list[str], days: int, avatar_url=None):
+async def generate_stats_embeds(interaction: discord.Interaction, characters: list[str], days: int, avatar_url=None, target_user_id: Optional[int] = None):
     since = datetime.utcnow() - timedelta(days=days)
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
@@ -145,6 +149,9 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
         winlos = wins / losses if losses > 0 else wins
         winrate = (wins / total) * 100 if total else 0
         stats.append((opponent, wins, losses, winlos, winrate))
+        
+    # ⬇️ Вставка ПРАВИЛЬНОЙ сортировки до пагинации
+    stats.sort(key=itemgetter(4))  # по winrate по возрастанию
 
     total_wins = sum(victories.values())
     total_losses = sum(defeats.values())
@@ -152,6 +159,7 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
     overall_winlos = total_wins / total_losses if total_losses > 0 else total_wins
     overall_winrate = (total_wins / total_matches) * 100 if total_matches else 0
     emoji_summary = get_winrate_emoji(overall_winrate)
+    
 
     # 🧾 Pagination
     page_size = 10
@@ -165,7 +173,7 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
             icon_url = avatar_url if avatar_url else None
         )
 
-        for opponent, wins, losses, winlos, winrate in sorted(stats[start:start+page_size], key=itemgetter(4), reverse=True):
+        for opponent, wins, losses, winlos, winrate in sorted(stats[start:start+page_size], key=itemgetter(4), reverse=False):
             display_data = await resolve_display_data(opponent, interaction.guild)
             emoji = get_winrate_emoji(winrate)
             embed.add_field(
@@ -174,12 +182,39 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
                 inline=False
             )
 
+        # summary = (
+        #     f"Total Wins: `{total_wins}`\n"
+        #     f"Total Losses: `{total_losses}`\n"
+        #     f"Overall Winlos: `{overall_winlos:.1f}`\n"
+        #     f"Overall Winrate: {emoji_summary} `{overall_winrate:.1f}%`"
+        # )
+        
+        
+        # MMR (по Discord-пользователю)
+        # mmr = get_user_mmr(interaction.user.id)
+        # mmr = get_user_mmr(target_user_id) if target_user_id else None
+        
+        if target_user_id:
+            chars = get_user_characters(target_user_id)
+        else:
+            chars = characters
+
+        mmrs = [get_mmr(c) for c in chars]
+        avg_mmr = round(sum(mmrs) / len(mmrs)) if mmrs else None
+
+
+        # mmr_line = f"`{mmr}`\n" if mmr else ""
+        mmr_line = f"`{avg_mmr}`\n" if avg_mmr is not None else ""
+
+        
         summary = (
             f"Total Wins: `{total_wins}`\n"
             f"Total Losses: `{total_losses}`\n"
             f"Overall Winlos: `{overall_winlos:.1f}`\n"
-            f"Overall Winrate: {emoji_summary} `{overall_winrate:.1f}%`"
+            f"Overall Winrate: {emoji_summary} `{overall_winrate:.1f}%`\n"
+            f"MMR: {mmr_line}"
         )
+
 
         # If there is only one character, add the final points:
         if len(characters) == 1:

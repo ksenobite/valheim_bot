@@ -34,10 +34,10 @@ class SimpleAudioSource(discord.AudioSource):
 # 🎶 Frags Styles
 KILLSTREAK_STYLES = {
     "classic": {
-        2: {"title": "⚡ DOUBLE KILL", "emojis": "⚔️⚔️"},
-        3: {"title": "🔥 TRIPLE KILL", "emojis": "🔥☠️"},
-        4: {"title": "💀 ULTRA KILL", "emojis": "💀💀"},
-        5: {"title": "👑 RAMPAGE", "emojis": "🔥👑"},
+        2: {"title": "🔥 DOUBLE KILL 🔥", "emojis": "🔥"},
+        3: {"title": "⚡️ TRIPLE KILL ⚡️", "emojis": "⚡️"},
+        4: {"title": "💥 ULTRA KILL 💥", "emojis": "💥"},
+        5: {"title": "💀 RAMPAGE 💀", "emojis": "💀"},
     },
     "epic": {
         2: {"title": "🌟 DOUBLE SLASH", "emojis": "⚡⚡"},
@@ -56,13 +56,13 @@ KILLSTREAK_STYLES = {
 
 DEATHLESS_STYLES = {
     "classic": {
-        3: {"title": "🔥 KILLING SPREE!", "emojis": "⚔️"},
-        4: {"title": "⚡ DOMINATING!", "emojis": "⚡"},
-        5: {"title": "💥 MEGA KILL!", "emojis": "💥"},
-        6: {"title": "🔥 UNSTOPPABLE!", "emojis": "🔥"},
-        7: {"title": "😈 WICKED SICK!", "emojis": "😈"},
-        8: {"title": "💀 MONSTER KILL!", "emojis": "💀"},
-        9: {"title": "👑 GODLIKE!", "emojis": "👑"},
+        3: {"title": "⚔️KILLING SPREE⚔️ ", "emojis": "⚔️"},
+        4: {"title": "🔥 DOMINATING! 🔥", "emojis": "🔥"},
+        5: {"title": "⚡️ MEGA KILL! ⚡️", "emojis": "⚡️"},
+        6: {"title": "💥UNSTOPPABLE💥", "emojis": "💥"},
+        7: {"title": "💀 WICKED SICK! 💀", "emojis": "💀"},
+        8: {"title": "😈MONSTER KILL😈", "emojis": "😈"},
+        9: {"title": "👑 GODLIKE!!! 👑", "emojis": "👑"},
     },
     "epic": {
         3: {"title": "⚔️ THEY’RE FALLING!", "emojis": "⚔️⚔️"},
@@ -123,7 +123,7 @@ async def send_killstreak_announcement(bot, killer: str, count: int):
     try:
         embed = discord.Embed(
             title=data["title"],
-            description=f"☠️ **{name}** is on a killstreak!\n{data['emojis']}",
+            description=f"**{name.upper()}** is on a killstreak!",
             color=color
         )
         if avatar_url:
@@ -173,7 +173,7 @@ async def send_deathless_announcement(bot, killer: str, count: int):
     try:
         embed = discord.Embed(
             title=data["title"],
-            description=f"🏹 **{name}** is on a deathless streak!\n{data['emojis']}",
+            description=f"**{name.upper()}** is on a deathless streak!",
             color=color
         )
         if avatar_url:
@@ -275,7 +275,11 @@ async def start_heartbeat_loop(bot, guild):
 async def audio_queue_worker(bot: discord.Client, guild: discord.Guild):
     while True:
         queue = audio_queues[guild.id]
-        if queue and guild.voice_client and not guild.voice_client.is_playing():
+        # if queue and guild.voice_client and not guild.voice_client.is_playing():
+        
+        voice_client = discord.utils.get(bot.voice_clients, guild=guild)
+        if queue and voice_client and not voice_client.is_playing():
+
             filepath = queue.popleft()
             try:
                 source = SimpleAudioSource(filepath)

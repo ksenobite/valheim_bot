@@ -6,6 +6,13 @@ echo     Building Project
 echo ===============================
 echo.
 
+where nuitka >nul 2>nul
+if errorlevel 1 (
+  echo ❌ Nuitka not found. Please install it first: pip install nuitka
+  pause
+  exit /b
+)
+
 REM Specify the main script
 set ENTRY=main.py
 
@@ -23,9 +30,14 @@ nuitka ^
   --include-data-dir=sounds=sounds ^
   --include-data-file=opus.dll=opus.dll ^
   --windows-icon-from-ico=repear.ico ^
+  --noinclude-data-files=.*\.env$ ^
+  --noinclude-data-files=frags\.db$
   %ENTRY%
 
 echo.
-echo ✅ Build complete!
-echo Output: dist\main.dist\main.exe
+if exist dist\main.dist\main.exe (
+  echo ✅ Build successful!
+) else (
+  echo ❌ Build failed. Check for errors above.
+)
 pause

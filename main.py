@@ -19,6 +19,7 @@ from db import *
 from commands import *
 from announcer import *
 
+
 # --- Logging ---
 
 logging.basicConfig(
@@ -52,7 +53,14 @@ setup_commands(bot)  # 👈 registering the commands
 # --- Paths & Init ---
 
 set_db_path(get_db_file_path())
-set_sounds_path(get_sounds_path())
+
+sounds_path = get_sounds_path()
+set_sounds_path(sounds_path)
+if not os.path.exists(sounds_path):
+    os.makedirs(sounds_path)
+    logging.warning(f"⚠️ Created missing 'sounds' directory at: {sounds_path}")
+else:
+    logging.info(f"✅ 'sounds' directory found: {sounds_path}")
 
 init_db()
 init_rank_roles_table()
@@ -64,13 +72,13 @@ clear_deathless_streaks()
 env_path = get_env_path()
 if not os.path.exists(env_path):
     logging.error(f"❌ .env file not found at {env_path}")
-    sys.exit(1)
+    sys.exit("❌ .env file not found")
 else:
     load_dotenv(dotenv_path=env_path)
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     logging.error("❌ DISCORD_TOKEN is missing from .env")
-    sys.exit(1)
+    sys.exit("❌ Token missing.")
     
 # --- Killstreaks ---
 

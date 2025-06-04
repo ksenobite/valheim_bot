@@ -54,6 +54,10 @@ def init_db():
             reason TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS ratings (
+            character TEXT PRIMARY KEY,
+            mmr INTEGER DEFAULT 1000
+        )""")
 
         conn.commit()
 
@@ -94,6 +98,18 @@ def set_announce_style(style_name):
 
 # --- Stats ---
 
+# def add_frag(killer, victim):
+#     now = datetime.utcnow()
+#     try:
+#         with sqlite3.connect(DB_FILE) as conn:
+#             c = conn.cursor()
+#             c.execute("INSERT INTO frags (killer, victim, timestamp) VALUES (?, ?, ?)", (killer, victim, now))
+#             conn.commit()
+#         logging.info(f"⚔️  {killer} killed {victim} at {now}")
+#     except sqlite3.Error as e:
+#         logging.error(f"❌ Error when adding a frag: {e}")
+
+
 def add_frag(killer, victim):
     now = datetime.utcnow()
     try:
@@ -102,8 +118,13 @@ def add_frag(killer, victim):
             c.execute("INSERT INTO frags (killer, victim, timestamp) VALUES (?, ?, ?)", (killer, victim, now))
             conn.commit()
         logging.info(f"⚔️  {killer} killed {victim} at {now}")
+        
+        # 🧠 Update MMR
+        update_mmr(killer, victim)
+
     except sqlite3.Error as e:
         logging.error(f"❌ Error when adding a frag: {e}")
+
 
 
 def get_top_players(n=10, days=1):
@@ -378,3 +399,129 @@ def get_win_sources(character: str) -> tuple[int, int]:
         natural = c.fetchone()[0] or 0
 
         return manual, natural
+
+# --- MMR ---
+
+# def get_mmr(character: str) -> int:
+#     """
+#     Returns the current MMR of a character. Creates a record with default MMR if not exists.
+#     """
+#     character = character.lower()
+#     with sqlite3.connect(get_db_path()) as conn:
+#         c = conn.cursor()
+#         c.execute("SELECT mmr FROM ratings WHERE character = ?", (character,))
+#         row = c.fetchone()
+#         if row is not None:
+#             return row[0]
+#         # Insert default if not found
+#         c.execute("INSERT INTO ratings (character, mmr) VALUES (?, ?)", (character, 1000))
+#         conn.commit()
+#         return 1000
+
+
+def get_mmr(character: str) -> int:
+    character = character.lower()
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute("SELECT mmr FROM ratings WHERE character = ?", (character,))
+        result = c.fetchone()
+        if result is None:
+            # Автоматическая инициализация
+            default_mmr = 1000
+            c.execute("INSERT INTO ratings (character, mmr) VALUES (?, ?)", (character, default_mmr))
+            conn.commit()
+            return default_mmr
+        return result[0]
+
+
+def set_mmr(character: str, mmr: int):
+    """
+    Sets the MMR of a character (inserts or updates).
+    """
+    character = character.lower()
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute("INSERT OR REPLACE INTO ratings (character, mmr) VALUES (?, ?)", (character, mmr))
+        conn.commit()
+
+
+def update_mmr(killer: str, victim: str, k: int = 32):
+    """
+    Updates MMR after a kill using ELO-style formula.
+    Handles rating inflation/deflation and prevents abuse.
+    """
+    killer = killer.lower()
+    victim = victim.lower()
+
+    kr = get_mmr(killer)
+    vr = get_mmr(victim)
+
+    # Expected scores
+    expected_k = 1 / (1 + 10 ** ((vr - kr) / 400))
+    expected_v = 1 / (1 + 10 ** ((kr - vr) / 400))
+
+    # New ratings
+    kr_new = int(kr + k * (1 - expected_k))
+    vr_new = int(vr + k * (0 - expected_v))
+
+    # Anti-abuse: if there is a big gap and the victim is too weak, we do not give an increase
+    if kr > 1400 and vr < 800 and (kr_new - kr) < 3:
+        kr_new = kr  # No bonus
+
+    logging.info(f"🔁 MMR update: {killer} ({kr} → {kr_new}) vs {victim} ({vr} → {vr_new})")
+
+
+    set_mmr(killer, kr_new)
+    set_mmr(victim, vr_new)
+
+
+# def get_user_mmr(discord_id: Optional[int] = None):
+#     """
+#     Returns the average MMR of all characters linked to the given Discord user.
+#     Returns None if no characters are linked or have no MMR.
+#     """
+#     with sqlite3.connect(get_db_path()) as conn:
+#         c = conn.cursor()
+#         c.execute("SELECT character FROM character_map WHERE discord_id = ?", (discord_id,))
+#         characters = [row[0] for row in c.fetchall()]
+
+#         if not characters:
+#             return None
+
+#         mmrs = []
+#         for character in characters:
+#             c.execute("SELECT mmr FROM ratings WHERE character = ?", (character.lower(),))
+#             row = c.fetchone()
+#             if row:
+#                 mmrs.append(row[0])
+
+#         if not mmrs:
+#             return None
+
+#         return int(sum(mmrs) / len(mmrs))
+
+
+def get_user_mmr(discord_id: Optional[int] = None):
+    characters = get_user_characters(discord_id)
+    if not characters:
+        return None
+    mmrs = [get_mmr(c) for c in characters]
+    mmrs = [m for m in mmrs if m is not None]
+    if not mmrs:
+        return None
+    return int(sum(mmrs) / len(mmrs))
+
+
+
+def get_top_mmr(limit: int = 10) -> list[tuple[str, int]]:
+    """
+    Returns a list of top characters by MMR.
+    Each item: (character, mmr)
+    """
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute("""
+            SELECT character, mmr FROM ratings
+            ORDER BY mmr DESC LIMIT ?
+        """, (limit,))
+        return c.fetchall()

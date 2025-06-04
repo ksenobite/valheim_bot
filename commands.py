@@ -23,6 +23,7 @@ from roles import *
 from announcer import *
 from utils import *
 
+
 # --- Admin commands ---
 
 def setup_commands(bot: commands.Bot):
@@ -380,25 +381,51 @@ def setup_commands(bot: commands.Bot):
                 GROUP BY killer
             """, (since,))
             raw_stats = c.fetchall()
+                
+        # Collecting frags and manual adjustments based on Discord ID or character name
+        user_points = {}
 
-        # Calculating the final points (frags + adjustments)
-        totals = []
         for character, frags in raw_stats:
-            manual, _ = get_win_sources(character)  # The function already gives manual and natural
+            manual, _ = get_win_sources(character)
             total = frags + manual
-            totals.append((character, frags, manual, total))
+            discord_id = get_character_owner(character)
 
-        # Sort by total_points
-        sorted_stats = sorted(totals, key=lambda x: x[3], reverse=True)[:count]
+            key = discord_id if discord_id else character  # Use the user_id if available, otherwise the character's name
+
+            if key not in user_points:
+                user_points[key] = {"characters": set(), "frags": 0, "manual": 0}
+
+            user_points[key]["characters"].add(character)
+            user_points[key]["frags"] += frags
+            user_points[key]["manual"] += manual
+
+        # Preparing the final sorting
+        aggregated_stats = []
+        for key, data in user_points.items():
+            total = data["frags"] + data["manual"]
+            aggregated_stats.append((key, data["characters"], data["frags"], data["manual"], total))
+
+        # Sort by total
+        sorted_stats = sorted(aggregated_stats, key=lambda x: x[4], reverse=True)[:count]
+
         if not sorted_stats:
             await interaction.followup.send(f"❌ No data for last {days} day(s).", ephemeral=not public)
             return
 
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
         embeds = []
+        
+        top_key = sorted_stats[0][0]
+        if isinstance(top_key, int):  # Discord user ID
+            member = interaction.guild.get_member(top_key)
+            top_display = {
+                "display_name": member.display_name if member else f"User {top_key}",
+                "avatar_url": member.display_avatar.url if member else None,
+                "color": member.top_role.color if member and member.top_role else discord.Color.default()
+            }
+        else:
+            top_display = await resolve_display_data(top_key, interaction.guild)
 
-        top_name = sorted_stats[0][0]
-        top_display = await resolve_display_data(top_name, interaction.guild)
         author_text = f"🏆 Top {count} players in the last {days} day(s)"
         page_size = 10
 
@@ -408,10 +435,30 @@ def setup_commands(bot: commands.Bot):
             if top_display.get("avatar_url"):
                 embed.set_thumbnail(url=top_display["avatar_url"])
 
-            for i, (character, frags, manual, total) in enumerate(sorted_stats[start:start+page_size], start + 1):
-                display_data = await resolve_display_data(character, interaction.guild)
+            for i, (key, characters, frags, manual, total) in enumerate(sorted_stats[start:start+page_size], start + 1):
+                if isinstance(key, int):
+                    member = interaction.guild.get_member(key)
+                    display_data = {
+                        "display_name": member.display_name if member else f"User {key}",
+                        "avatar_url": member.display_avatar.url if member else None
+                    }
+                else:
+                    # character with no linked user
+                    display_data = await resolve_display_data(key, interaction.guild)
+
                 medal = medals.get(i, "")
-                line = f"Points:`{total}`\tFrags:`{frags}`\tExtra:`{manual}`"
+                char_list = ", ".join(characters)
+                                
+
+                if isinstance(key, int):  # Discord ID
+                    mmr = get_user_mmr(key) or "—"
+                else:
+                    mmr = get_mmr(key) or "—"
+                    
+                line = f"`{char_list}`\nPoints: `{total}`\tFrags: `{frags}`\tExtra: `{manual}`\tMMR: `{mmr}`"
+                
+                # line = f"`{char_list}`\nPoints:`{total}`\tFrags:`{frags}`\tExtra:`{manual}`"
+                
                 embed.add_field(
                     name=f"**{i}. {medal} {display_data['display_name'].upper()}**",
                     value=line,
@@ -447,7 +494,9 @@ def setup_commands(bot: commands.Bot):
         # ✅  Protection from the Unknown Interaction error
         await interaction.response.defer(thinking=True, ephemeral=not public)
         avatar_url = interaction.user.display_avatar.url
-        embeds = await generate_stats_embeds(interaction, characters, days, avatar_url=avatar_url)
+        # embeds = await generate_stats_embeds(interaction, characters, days, avatar_url=avatar_url)
+        embeds = await generate_stats_embeds(interaction, characters, days, avatar_url=avatar_url, target_user_id=interaction.user.id)
+
         
         if not embeds:
             await interaction.followup.send("❌ No stats available for this player.", ephemeral=not public)
@@ -460,6 +509,48 @@ def setup_commands(bot: commands.Bot):
             await view.send_initial(interaction)
     
     
+    # @bot.tree.command(name="stats", description="Show player stats")
+    # @app_commands.describe(player="character or @user", days="Days", public="Publish?")
+    # async def stats(interaction: Interaction, player: str, days: int = 1, public: bool = False):
+    #     if public and not interaction.user.guild_permissions.administrator:
+    #         await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
+    #         return
+    #     if not await check_positive(interaction, days=days):
+    #         return
+    #     await interaction.response.defer(thinking=True, ephemeral=not public)
+    #     avatar_url = None
+    #     characters = []
+        
+    #     # Check if the input is a Discord mention
+    #     if match := re.match(r"<@!?(\d+)>", player):
+    #         user_id = int(match.group(1))
+    #         characters = get_user_characters(user_id)
+    #         if not characters:
+    #             await interaction.followup.send("❌ No characters linked to this user.", ephemeral=True)
+    #             return
+    #         try:
+    #             user = await bot.fetch_user(user_id)
+    #             avatar_url = user.display_avatar.url
+    #         except Exception:
+    #             avatar_url = None
+    #     else:
+    #         characters = [player.lower()]
+    #     # embeds = await generate_stats_embeds(interaction, characters, days, avatar_url=avatar_url)
+    #     embeds = await generate_stats_embeds(interaction, characters, days, avatar_url=avatar_url, target_user_id=user_id)
+
+        
+    #     if not embeds:
+    #         await interaction.followup.send("❌ No stats available for this player.", ephemeral=not public)
+    #         return
+        
+    #     if len(embeds) == 1:
+    #         await interaction.followup.send(embed=embeds[0], ephemeral=not public)
+    #     else:
+    #         view = PaginatedStatsView(embeds, ephemeral=not public)
+    #         await view.send_initial(interaction)
+    
+    
+    
     @bot.tree.command(name="stats", description="Show player stats")
     @app_commands.describe(player="character or @user", days="Days", public="Publish?")
     async def stats(interaction: Interaction, player: str, days: int = 1, public: bool = False):
@@ -469,9 +560,11 @@ def setup_commands(bot: commands.Bot):
         if not await check_positive(interaction, days=days):
             return
         await interaction.response.defer(thinking=True, ephemeral=not public)
+
         avatar_url = None
         characters = []
-        # Check if the input is a Discord mention
+        user_id = None  # ✅ фикс
+
         if match := re.match(r"<@!?(\d+)>", player):
             user_id = int(match.group(1))
             characters = get_user_characters(user_id)
@@ -485,17 +578,23 @@ def setup_commands(bot: commands.Bot):
                 avatar_url = None
         else:
             characters = [player.lower()]
-        embeds = await generate_stats_embeds(interaction, characters, days, avatar_url=avatar_url)
-        
+
+        embeds = await generate_stats_embeds(
+            interaction, characters, days,
+            avatar_url=avatar_url,
+            target_user_id=user_id  # ✅ безопасно
+        )
+
         if not embeds:
             await interaction.followup.send("❌ No stats available for this player.", ephemeral=not public)
             return
-        
+
         if len(embeds) == 1:
             await interaction.followup.send(embed=embeds[0], ephemeral=not public)
         else:
             view = PaginatedStatsView(embeds, ephemeral=not public)
             await view.send_initial(interaction)
+
 
 
     @bot.tree.command(name="whois", description="Show who owns the character or what characters belong to a user")
@@ -560,7 +659,7 @@ def setup_commands(bot: commands.Bot):
             color=discord.Color.green()
         )
         for wins, role_name in ranks:
-            embed.add_field(name=f"{role_name}", value=f"{wins}+ wins", inline=True)
+            embed.add_field(name=f"{role_name}", value=f"{wins}+", inline=True)
         await interaction.response.send_message(embed=embed, ephemeral=not public)
 
 # --- Help ---
