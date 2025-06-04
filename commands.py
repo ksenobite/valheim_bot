@@ -457,8 +457,6 @@ def setup_commands(bot: commands.Bot):
                     
                 line = f"`{char_list}`\nPoints: `{total}`\tFrags: `{frags}`\tExtra: `{manual}`\tMMR: `{mmr}`"
                 
-                # line = f"`{char_list}`\nPoints:`{total}`\tFrags:`{frags}`\tExtra:`{manual}`"
-                
                 embed.add_field(
                     name=f"**{i}. {medal} {display_data['display_name'].upper()}**",
                     value=line,
@@ -494,10 +492,8 @@ def setup_commands(bot: commands.Bot):
         # ✅  Protection from the Unknown Interaction error
         await interaction.response.defer(thinking=True, ephemeral=not public)
         avatar_url = interaction.user.display_avatar.url
-        # embeds = await generate_stats_embeds(interaction, characters, days, avatar_url=avatar_url)
         embeds = await generate_stats_embeds(interaction, characters, days, avatar_url=avatar_url, target_user_id=interaction.user.id)
 
-        
         if not embeds:
             await interaction.followup.send("❌ No stats available for this player.", ephemeral=not public)
             return
@@ -507,48 +503,6 @@ def setup_commands(bot: commands.Bot):
         else:
             view = PaginatedStatsView(embeds, ephemeral=not public)
             await view.send_initial(interaction)
-    
-    
-    # @bot.tree.command(name="stats", description="Show player stats")
-    # @app_commands.describe(player="character or @user", days="Days", public="Publish?")
-    # async def stats(interaction: Interaction, player: str, days: int = 1, public: bool = False):
-    #     if public and not interaction.user.guild_permissions.administrator:
-    #         await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
-    #         return
-    #     if not await check_positive(interaction, days=days):
-    #         return
-    #     await interaction.response.defer(thinking=True, ephemeral=not public)
-    #     avatar_url = None
-    #     characters = []
-        
-    #     # Check if the input is a Discord mention
-    #     if match := re.match(r"<@!?(\d+)>", player):
-    #         user_id = int(match.group(1))
-    #         characters = get_user_characters(user_id)
-    #         if not characters:
-    #             await interaction.followup.send("❌ No characters linked to this user.", ephemeral=True)
-    #             return
-    #         try:
-    #             user = await bot.fetch_user(user_id)
-    #             avatar_url = user.display_avatar.url
-    #         except Exception:
-    #             avatar_url = None
-    #     else:
-    #         characters = [player.lower()]
-    #     # embeds = await generate_stats_embeds(interaction, characters, days, avatar_url=avatar_url)
-    #     embeds = await generate_stats_embeds(interaction, characters, days, avatar_url=avatar_url, target_user_id=user_id)
-
-        
-    #     if not embeds:
-    #         await interaction.followup.send("❌ No stats available for this player.", ephemeral=not public)
-    #         return
-        
-    #     if len(embeds) == 1:
-    #         await interaction.followup.send(embed=embeds[0], ephemeral=not public)
-    #     else:
-    #         view = PaginatedStatsView(embeds, ephemeral=not public)
-    #         await view.send_initial(interaction)
-    
     
     
     @bot.tree.command(name="stats", description="Show player stats")
@@ -563,7 +517,7 @@ def setup_commands(bot: commands.Bot):
 
         avatar_url = None
         characters = []
-        user_id = None  # ✅ фикс
+        user_id = None  # ✅ fix
 
         if match := re.match(r"<@!?(\d+)>", player):
             user_id = int(match.group(1))
@@ -582,7 +536,7 @@ def setup_commands(bot: commands.Bot):
         embeds = await generate_stats_embeds(
             interaction, characters, days,
             avatar_url=avatar_url,
-            target_user_id=user_id  # ✅ безопасно
+            target_user_id=user_id  # ✅ safe
         )
 
         if not embeds:
@@ -594,7 +548,6 @@ def setup_commands(bot: commands.Bot):
         else:
             view = PaginatedStatsView(embeds, ephemeral=not public)
             await view.send_initial(interaction)
-
 
 
     @bot.tree.command(name="whois", description="Show who owns the character or what characters belong to a user")

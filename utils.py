@@ -30,14 +30,12 @@ class PaginatedStatsView(discord.ui.View):
     async def prev(self, interaction: Interaction, button: discord.ui.Button):
         if self.index > 0:
             self.index -= 1
-            # await interaction.edit_original_response(embed=self.embeds[self.index], view=self)
             await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
 
     @discord.ui.button(label="Next ⏩", style=discord.ButtonStyle.grey)
     async def next(self, interaction: Interaction, button: discord.ui.Button):
         if self.index < len(self.embeds) - 1:
             self.index += 1
-            # await interaction.edit_original_response(embed=self.embeds[self.index], view=self)
             await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
 
 
@@ -111,17 +109,13 @@ async def resolve_display_data(character_name: str, guild: discord.Guild) -> dic
     }
 
 
-# async def generate_stats_embeds(interaction: discord.Interaction, characters: list[str], days: int, avatar_url=None):
 async def generate_stats_embeds(interaction: discord.Interaction, characters: list[str], days: int, avatar_url=None, target_user_id: Optional[int] = None):
     since = datetime.utcnow() - timedelta(days=days)
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
-
         victories = {}
         defeats = {}
-
         characters = [name.lower() for name in characters]
-
         for character in characters:
             c.execute("""
                 SELECT victim, COUNT(*) FROM frags
@@ -130,7 +124,6 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
             """, (character, since))
             for victim, count in c.fetchall():
                 victories[victim] = victories.get(victim, 0) + count
-
             c.execute("""
                 SELECT killer, COUNT(*) FROM frags
                 WHERE victim = ? AND timestamp >= ?
@@ -150,8 +143,8 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
         winrate = (wins / total) * 100 if total else 0
         stats.append((opponent, wins, losses, winlos, winrate))
         
-    # ⬇️ Вставка ПРАВИЛЬНОЙ сортировки до пагинации
-    stats.sort(key=itemgetter(4))  # по winrate по возрастанию
+    # ⬇️  Inserting the CORRECT sorting before pagination
+    stats.sort(key=itemgetter(4))  # by winrate in ascending order
 
     total_wins = sum(victories.values())
     total_losses = sum(defeats.values())
@@ -160,7 +153,6 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
     overall_winrate = (total_wins / total_matches) * 100 if total_matches else 0
     emoji_summary = get_winrate_emoji(overall_winrate)
     
-
     # 🧾 Pagination
     page_size = 10
     embeds = []
@@ -181,18 +173,7 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
                 value=f"Wins: `{wins}`\tLosses: `{losses}`\nWinlos: `{winlos:.1f}`\tWinrate: `{winrate:.1f}%`",
                 inline=False
             )
-
-        # summary = (
-        #     f"Total Wins: `{total_wins}`\n"
-        #     f"Total Losses: `{total_losses}`\n"
-        #     f"Overall Winlos: `{overall_winlos:.1f}`\n"
-        #     f"Overall Winrate: {emoji_summary} `{overall_winrate:.1f}%`"
-        # )
-        
-        
-        # MMR (по Discord-пользователю)
-        # mmr = get_user_mmr(interaction.user.id)
-        # mmr = get_user_mmr(target_user_id) if target_user_id else None
+            
         
         if target_user_id:
             chars = get_user_characters(target_user_id)
@@ -201,12 +182,8 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
 
         mmrs = [get_mmr(c) for c in chars]
         avg_mmr = round(sum(mmrs) / len(mmrs)) if mmrs else None
-
-
-        # mmr_line = f"`{mmr}`\n" if mmr else ""
         mmr_line = f"`{avg_mmr}`\n" if avg_mmr is not None else ""
 
-        
         summary = (
             f"Total Wins: `{total_wins}`\n"
             f"Total Losses: `{total_losses}`\n"
@@ -214,7 +191,6 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
             f"Overall Winrate: {emoji_summary} `{overall_winrate:.1f}%`\n"
             f"MMR: {mmr_line}"
         )
-
 
         # If there is only one character, add the final points:
         if len(characters) == 1:

@@ -402,23 +402,6 @@ def get_win_sources(character: str) -> tuple[int, int]:
 
 # --- MMR ---
 
-# def get_mmr(character: str) -> int:
-#     """
-#     Returns the current MMR of a character. Creates a record with default MMR if not exists.
-#     """
-#     character = character.lower()
-#     with sqlite3.connect(get_db_path()) as conn:
-#         c = conn.cursor()
-#         c.execute("SELECT mmr FROM ratings WHERE character = ?", (character,))
-#         row = c.fetchone()
-#         if row is not None:
-#             return row[0]
-#         # Insert default if not found
-#         c.execute("INSERT INTO ratings (character, mmr) VALUES (?, ?)", (character, 1000))
-#         conn.commit()
-#         return 1000
-
-
 def get_mmr(character: str) -> int:
     character = character.lower()
     with sqlite3.connect(get_db_path()) as conn:
@@ -452,53 +435,20 @@ def update_mmr(killer: str, victim: str, k: int = 32):
     """
     killer = killer.lower()
     victim = victim.lower()
-
     kr = get_mmr(killer)
     vr = get_mmr(victim)
-
     # Expected scores
     expected_k = 1 / (1 + 10 ** ((vr - kr) / 400))
     expected_v = 1 / (1 + 10 ** ((kr - vr) / 400))
-
     # New ratings
     kr_new = int(kr + k * (1 - expected_k))
     vr_new = int(vr + k * (0 - expected_v))
-
     # Anti-abuse: if there is a big gap and the victim is too weak, we do not give an increase
     if kr > 1400 and vr < 800 and (kr_new - kr) < 3:
         kr_new = kr  # No bonus
-
     logging.info(f"🔁 MMR update: {killer} ({kr} → {kr_new}) vs {victim} ({vr} → {vr_new})")
-
-
     set_mmr(killer, kr_new)
     set_mmr(victim, vr_new)
-
-
-# def get_user_mmr(discord_id: Optional[int] = None):
-#     """
-#     Returns the average MMR of all characters linked to the given Discord user.
-#     Returns None if no characters are linked or have no MMR.
-#     """
-#     with sqlite3.connect(get_db_path()) as conn:
-#         c = conn.cursor()
-#         c.execute("SELECT character FROM character_map WHERE discord_id = ?", (discord_id,))
-#         characters = [row[0] for row in c.fetchall()]
-
-#         if not characters:
-#             return None
-
-#         mmrs = []
-#         for character in characters:
-#             c.execute("SELECT mmr FROM ratings WHERE character = ?", (character.lower(),))
-#             row = c.fetchone()
-#             if row:
-#                 mmrs.append(row[0])
-
-#         if not mmrs:
-#             return None
-
-#         return int(sum(mmrs) / len(mmrs))
 
 
 def get_user_mmr(discord_id: Optional[int] = None):
@@ -510,7 +460,6 @@ def get_user_mmr(discord_id: Optional[int] = None):
     if not mmrs:
         return None
     return int(sum(mmrs) / len(mmrs))
-
 
 
 def get_top_mmr(limit: int = 10) -> list[tuple[str, int]]:
