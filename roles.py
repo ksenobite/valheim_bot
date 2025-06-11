@@ -90,3 +90,32 @@ async def update_roles_for_all_members(bot: discord.Client, days: int = 7):
                 continue
             logging.info(f"✅ Characters found: {characters}")
             await assign_role_based_on_wins(member, days=days)
+
+
+async def update_mmr_roles(bot: discord.Client):
+    roles = get_all_mmr_roles()
+    if not roles:
+        logging.info("📭 No MMR roles configured.")
+        return
+    guild = discord.utils.get(bot.guilds)
+    if not guild:
+        logging.warning("❗ Bot is not in a guild.")
+        return
+
+    for member in guild.members:
+        characters = get_user_characters(member.id)
+        if not characters:
+            continue
+        mmr = get_user_mmr(member.id)
+        if mmr is None:
+            continue
+        role_to_assign = None
+        for threshold, role_name in roles:
+            if mmr >= threshold:
+                role_to_assign = discord.utils.get(guild.roles, name=role_name)
+        if role_to_assign and role_to_assign not in member.roles:
+            try:
+                await member.add_roles(role_to_assign)
+                logging.info(f"✅ Assigned {role_to_assign.name} to {member.display_name}")
+            except Exception as e:
+                logging.warning(f"❌ Failed to assign role: {e}")

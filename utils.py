@@ -161,7 +161,7 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
             color=discord.Color.blue()
         )
         embed.set_author(
-            name=f"📊 Stats for {len(characters)} character(s) over {days} day(s)",
+            name=f"📊 Stats for {len(characters)} character(s) in {days} day(s)",
             icon_url = avatar_url if avatar_url else None
         )
 
@@ -180,8 +180,19 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
         else:
             chars = characters
 
-        mmrs = [get_mmr(c) for c in chars]
+
+        # mmrs = [get_mmr(c) for c in chars]
+        # avg_mmr = round(sum(mmrs) / len(mmrs)) if mmrs else None
+
+        
+        mmrs = []
+        for c in chars:
+            glicko = get_glicko_rating(c)
+            if glicko:
+                mmrs.append(glicko[0])
         avg_mmr = round(sum(mmrs) / len(mmrs)) if mmrs else None
+        
+        
         mmr_line = f"`{avg_mmr}`\n" if avg_mmr is not None else ""
 
         summary = (
@@ -210,6 +221,71 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
             value=f"Frags: `{total_wins}`\nExtra: `{manual}`",
             inline=False
         )
+
+        embeds.append(embed)
+
+    return embeds
+
+
+async def generate_topmmr_embeds(interaction: Interaction, leaderboard_data: list, public: bool = False, details: bool = False):
+    """
+    leaderboard_data: list of tuples
+    [
+        (display_name, avatar_url, characters, mmr, fights, wins, losses, winrate, recent_days),
+        ...
+    ]
+    """
+    embeds = []
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+
+    author_text = f"🏆 Top MMR"
+    color = discord.Color.gold()  # фиксированный цвет для Glicko-лидерборда
+
+    page_size = 10
+    for start in range(0, len(leaderboard_data), page_size):
+        embed = discord.Embed(color=color)
+        embed.set_author(name=author_text)
+
+        if leaderboard_data[start][1]:
+            embed.set_thumbnail(url=leaderboard_data[start][1])
+
+        for j, (name, avatar_url, chars, mmr, fights, wins, losses, winrate, recent_days) in enumerate(
+            leaderboard_data[start:start+page_size]
+        ):
+            i = start + j + 1
+            char_text = ", ".join(chars)
+            medal = medals.get(i, "")
+            winlos = f"{wins}/{losses}"
+            winrate_str = f"{winrate:.1f}%"
+
+            # 🎯 Активность: цвет + сколько дней назад
+            if recent_days <= 3:
+                activity = f"🟢 `{recent_days}d ago`"
+            elif recent_days <= 7:
+                activity = f"🟡 `{recent_days}d ago`"
+            else:
+                activity = f"🔴 `{recent_days}d ago`"
+
+            if details:
+                value = (
+                    f"`{char_text}`\n"
+                    f"⚔️ `MMR: {round(mmr)}`\n"
+                    f"Fights: `{fights}`\n"
+                    f"Win/Los: `{winlos}`\n"
+                    f"Winrate: `{winrate_str}`\n"
+                    f"{activity}"
+                )
+            else:
+                value = (
+                    f"`{char_text}`\n"
+                    f"⚔️ **`{round(mmr)}`**\t{activity}"
+                )
+
+            embed.add_field(
+                name=f"**{i}. {medal} {name.upper()}**",
+                value=value,
+                inline=False
+            )
 
         embeds.append(embed)
 

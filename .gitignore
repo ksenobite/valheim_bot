@@ -8,3 +8,7 @@ build/
 *.spec
 master_checklist.md
 project_state.md
+mmr_analysis.py
+mmr_dump.txt
+points_test.py
+glicko2_analysis.py

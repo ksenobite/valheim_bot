@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from settings import get_db_file_path
+from glicko2 import Player
 
 DB_FILE = None
 
@@ -54,11 +55,43 @@ def init_db():
             reason TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )""")
+        
         c.execute("""CREATE TABLE IF NOT EXISTS ratings (
             character TEXT PRIMARY KEY,
             mmr INTEGER DEFAULT 1000
         )""")
-
+        
+        c.execute("""CREATE TABLE IF NOT EXISTS mmr_history (
+                character TEXT,
+                delta INTEGER,
+                reason TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        c.execute("""CREATE TABLE IF NOT EXISTS last_win (
+                character TEXT PRIMARY KEY,
+                last_win TIMESTAMP
+            )
+        """)
+        
+        c.execute("""CREATE TABLE IF NOT EXISTS glicko_ratings (
+            character TEXT PRIMARY KEY,
+            rating REAL DEFAULT 1500,
+            rd REAL DEFAULT 350,
+            vol REAL DEFAULT 0.06
+        )
+        """)
+        
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS glicko_history (
+                character TEXT NOT NULL,
+                delta REAL NOT NULL,
+                reason TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+                        
         conn.commit()
 
 
@@ -98,18 +131,6 @@ def set_announce_style(style_name):
 
 # --- Stats ---
 
-# def add_frag(killer, victim):
-#     now = datetime.utcnow()
-#     try:
-#         with sqlite3.connect(DB_FILE) as conn:
-#             c = conn.cursor()
-#             c.execute("INSERT INTO frags (killer, victim, timestamp) VALUES (?, ?, ?)", (killer, victim, now))
-#             conn.commit()
-#         logging.info(f"⚔️  {killer} killed {victim} at {now}")
-#     except sqlite3.Error as e:
-#         logging.error(f"❌ Error when adding a frag: {e}")
-
-
 def add_frag(killer, victim):
     now = datetime.utcnow()
     try:
@@ -119,12 +140,13 @@ def add_frag(killer, victim):
             conn.commit()
         logging.info(f"⚔️  {killer} killed {victim} at {now}")
         
+        update_last_win(killer)
+        
         # 🧠 Update MMR
-        update_mmr(killer, victim)
+        update_glicko_ratings(killer, victim)
 
     except sqlite3.Error as e:
         logging.error(f"❌ Error when adding a frag: {e}")
-
 
 
 def get_top_players(n=10, days=1):
@@ -402,21 +424,6 @@ def get_win_sources(character: str) -> tuple[int, int]:
 
 # --- MMR ---
 
-def get_mmr(character: str) -> int:
-    character = character.lower()
-    with sqlite3.connect(get_db_path()) as conn:
-        c = conn.cursor()
-        c.execute("SELECT mmr FROM ratings WHERE character = ?", (character,))
-        result = c.fetchone()
-        if result is None:
-            # Автоматическая инициализация
-            default_mmr = 1000
-            c.execute("INSERT INTO ratings (character, mmr) VALUES (?, ?)", (character, default_mmr))
-            conn.commit()
-            return default_mmr
-        return result[0]
-
-
 def set_mmr(character: str, mmr: int):
     """
     Sets the MMR of a character (inserts or updates).
@@ -428,7 +435,7 @@ def set_mmr(character: str, mmr: int):
         conn.commit()
 
 
-def update_mmr(killer: str, victim: str, k: int = 32):
+def update_mmr(killer: str, victim: str, k: int = 16):
     """
     Updates MMR after a kill using ELO-style formula.
     Handles rating inflation/deflation and prevents abuse.
@@ -442,12 +449,14 @@ def update_mmr(killer: str, victim: str, k: int = 32):
     expected_v = 1 / (1 + 10 ** ((kr - vr) / 400))
     # New ratings
     kr_new = int(kr + k * (1 - expected_k))
-    vr_new = int(vr + k * (0 - expected_v))
+    # vr_new = int(vr + k * (0 - expected_v))
+    vr_new = int(vr - k * (1 - expected_k))
+    
     # Anti-abuse: if there is a big gap and the victim is too weak, we do not give an increase
     if kr > 1400 and vr < 800 and (kr_new - kr) < 3:
         kr_new = kr  # No bonus
     logging.info(f"🔁 MMR update: {killer} ({kr} → {kr_new}) vs {victim} ({vr} → {vr_new})")
-    set_mmr(killer, kr_new)
+    set_mmr(killer, kr_new)    
     set_mmr(victim, vr_new)
 
 
@@ -472,5 +481,226 @@ def get_top_mmr(limit: int = 10) -> list[tuple[str, int]]:
         c.execute("""
             SELECT character, mmr FROM ratings
             ORDER BY mmr DESC LIMIT ?
+        """, (limit,))
+        return c.fetchall()
+
+
+def set_mmr_role(threshold: int, role_name: str):
+    with sqlite3.connect(get_db_path()) as conn:
+        conn.execute("""
+            INSERT OR REPLACE INTO mmr_roles (threshold, role_name)
+            VALUES (?, ?)
+        """, (threshold, role_name))
+
+
+def get_all_mmr_roles() -> list[tuple[int, str]]:
+    with sqlite3.connect(get_db_path()) as conn:
+        cur = conn.execute("SELECT threshold, role_name FROM mmr_roles ORDER BY threshold ASC")
+        return cur.fetchall()
+
+
+def clear_mmr_roles():
+    with sqlite3.connect(get_db_path()) as conn:
+        conn.execute("DELETE FROM mmr_roles")
+
+
+def update_last_win(character: str):
+    with sqlite3.connect(get_db_path()) as conn:
+        conn.execute(
+            "UPDATE ratings SET last_win = ? WHERE character = ?",
+            (datetime.utcnow().isoformat(), character.lower())
+        )
+
+
+def apply_decay(decay_per_day: int = 10, grace_days: int = 3):
+    """
+    Reduces the MMR of all characters who have not won in the last grace_days.
+    decay_per_day — how much MMR is lost for each day of inactivity after grace_days.
+    """
+    now = datetime.utcnow()
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        
+        c.execute("SELECT character, mmr FROM ratings")
+        all_ratings = c.fetchall()
+        
+        for character, mmr in all_ratings:
+            c.execute("SELECT last_win FROM last_win WHERE character = ?", (character,))
+            row = c.fetchone()
+            if row and row[0]:
+                try:
+                    last_win = datetime.fromisoformat(row[0])
+                except Exception:
+                    continue
+                delta_days = (now - last_win).days
+            else:
+                delta_days = grace_days + 1  # if there are no wins, we immediately fine you
+
+            if delta_days > grace_days:
+                penalty_days = delta_days - grace_days
+                decay = decay_per_day * penalty_days
+                new_mmr = max(0, mmr - decay)
+
+                logging.info(f"📉 Decay applied to {character}: -{decay} MMR ({mmr} → {new_mmr})")
+
+                c.execute(
+                    "UPDATE ratings SET mmr = ? WHERE character = ?",
+                    (new_mmr, character)
+                )
+        
+        conn.commit()
+
+
+def clear_all_mmr():
+    with sqlite3.connect(get_db_path()) as conn:
+        conn.execute("DELETE FROM ratings")
+        conn.commit()
+
+
+def rebuild_last_win():
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM last_win")
+
+        c.execute("""
+            SELECT killer, MAX(timestamp)
+            FROM frags
+            GROUP BY killer
+        """)
+        rows = c.fetchall()
+
+        for character, last in rows:
+            c.execute("INSERT INTO last_win (character, last_win) VALUES (?, ?)", (character, last))
+
+        conn.commit()
+
+# --- GLICKO-2 ---
+
+def get_glicko_rating(character: str) -> tuple[float, float, float]:
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute("""
+            SELECT rating, rd, vol FROM glicko_ratings WHERE character = ?
+        """, (character.lower(),))
+        row = c.fetchone()
+        return row if row else (1500.0, 350.0, 0.06)
+
+
+def set_glicko_rating(character: str, rating: float, rd: float, vol: float):
+    with sqlite3.connect(get_db_path()) as conn:
+        conn.execute("""
+            INSERT OR REPLACE INTO glicko_ratings (character, rating, rd, vol)
+            VALUES (?, ?, ?, ?)
+        """, (character.lower(), rating, rd, vol))
+        conn.commit()
+
+
+def update_glicko_ratings(killer: str, victim: str):
+    p1 = Player(*get_glicko_rating(killer))
+    p2 = Player(*get_glicko_rating(victim))
+
+    p1.update_player([p2.getRating()], [p2.getRd()], [1])
+    p2.update_player([p1.getRating()], [p1.getRd()], [0])
+
+    set_glicko_rating(killer, p1.getRating(), p1.getRd(), p1._vol)
+    set_glicko_rating(victim, p2.getRating(), p2.getRd(), p2._vol)
+
+def get_user_glicko_mmr(discord_id: int) -> Optional[int]:
+    """
+    Возвращает средний Glicko-2 рейтинг для всех персонажей, связанных с пользователем.
+    """
+    characters = get_user_characters(discord_id)
+    if not characters:
+        return None
+
+    mmrs = []
+    for char in characters:
+        glicko_data = get_glicko_rating(char)
+        if glicko_data:
+            mmrs.append(glicko_data[0])  # Только рейтинг
+
+    if not mmrs:
+        return None
+
+    return int(round(sum(mmrs) / len(mmrs)))
+
+
+def get_fight_stats(character: str, since: datetime) -> tuple[int, int, int]:
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+
+        c.execute("""
+            SELECT COUNT(*) FROM frags
+            WHERE killer = ? AND timestamp >= ?
+        """, (character.lower(), since))
+        wins = c.fetchone()[0]
+
+        c.execute("""
+            SELECT COUNT(*) FROM frags
+            WHERE victim = ? AND timestamp >= ?
+        """, (character.lower(), since))
+        losses = c.fetchone()[0]
+
+        return wins, losses, wins + losses
+
+
+def get_last_active_day(character: str) -> Optional[datetime.date]:
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute("""
+            SELECT MAX(timestamp) FROM frags
+            WHERE killer = ? OR victim = ?
+        """, (character.lower(), character.lower()))
+        result = c.fetchone()[0]
+        if result:
+            return datetime.fromisoformat(result).date()
+        return None
+
+
+def get_all_players() -> set:
+    """
+    Returns a set of unique identifiers:
+    - Discord IDs (int) for linked users
+    - Character names (str) for standalone players
+    """
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+
+        # Discord users (linked players)
+        c.execute("SELECT DISTINCT discord_id FROM character_map")
+        discord_ids = {row[0] for row in c.fetchall()}
+
+        # Unlinked characters (standalone characters)
+        c.execute("""
+            SELECT DISTINCT r.character
+            FROM ratings r
+            LEFT JOIN character_map cm ON r.character = cm.character
+            WHERE cm.character IS NULL
+        """)
+        unlinked_characters = {row[0] for row in c.fetchall()}
+
+        return discord_ids | unlinked_characters
+
+def get_user_glicko_rating(discord_id: Optional[int] = None) -> Optional[float]:
+    characters = get_user_characters(discord_id)
+    if not characters:
+        return None
+    ratings = [get_glicko_rating(c)[0] for c in characters]
+    ratings = [r for r in ratings if r is not None]
+    if not ratings:
+        return None
+    return sum(ratings) / len(ratings)
+
+
+def get_top_glicko(limit: int = 10) -> list[tuple[str, float]]:
+    """
+    Returns a list of top characters by Glicko-2 rating.
+    Each item: (character, rating)
+    """
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute("""
+            SELECT character, rating FROM glicko_ratings
+            ORDER BY rating DESC LIMIT ?
         """, (limit,))
         return c.fetchall()
