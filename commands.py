@@ -919,7 +919,7 @@ def setup_commands(bot: commands.Bot):
             logging.exception("❌ Failed to reset and reinitialize Glicko-2 ratings")
             await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
-
+# --- for gpt ---
 
     @bot.tree.command(name="topmmr", description="Top players by Glicko-2 rating")
     @app_commands.describe(

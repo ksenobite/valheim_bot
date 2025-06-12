@@ -31,7 +31,7 @@ nuitka ^
   --include-data-file=opus.dll=opus.dll ^
   --windows-icon-from-ico=repear.ico ^
   --noinclude-data-files=.*\.env$ ^
-  --noinclude-data-files=frags\.db$
+  --noinclude-data-files=frags\.db$ ^
   %ENTRY%
 
 echo.
