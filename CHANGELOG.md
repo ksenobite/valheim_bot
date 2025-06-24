@@ -1,7 +1,35 @@
 #### 📄 `CHANGELOG.md`
 ```markdown
 
-## v6.5.0 — 2025-05-26–27
+## v7.0.0 — 2025-06-20
+
+### Added
+- 📈 Advanced **matchmaking rating system** (Glicko-2): rating, deviation (RD), and volatility
+- 🧮 New rating commands:
+  - `/topmmr`, `/mmr`, `/mmrlog`, `/mmrsync`, `/mmrclear`
+- 👑 Role assignment based on MMR:
+  - `/mmrroles`, `/mmrroleset`, `/mmrroleupdate`, `/mmrroleclear`
+- 🧾 MMR history logging via `glicko_history` table
+- 📊 Rating info integrated into `/top`, `/stats`, `/mystats`
+- 💀 New streak-break announcements:
+  - Dynamic embed and `obezhiren.wav` sound when a streak ends
+
+### Changed
+- ✏️ Default rating display now shows MMR (instead of legacy Elo)
+- 🧹 Removed legacy logic:
+  - `ratings` table, `update_mmr`, `apply_decay`, and related functions
+- 📉 Deprecated the old point-based auto-role system
+- 🧼 Removed commands:
+  - `/autoroles`, `/autorolestatus`, `/autoroletimeout`
+- 🧱 Updated build pipeline:
+  - Python 3.13.5 + virtual environment
+  - Nuitka 2.7 compatibility with standalone assets
+
+### Fixed
+- 🐛 Resolved all `Pylance` and typing warnings (`guild_permissions`, `send`, etc.)
+- 🔒 Improved guild/context checks and error handling across commands
+
+## v6.5.0 — 2025-05–27
 - ➕ New command: `/points`
   - Allows admins to manually add or subtract points (wins) from characters or users.
   - Supports flexible adjustments with reason logging for transparency.

@@ -7,8 +7,11 @@ import logging
 import discord
 import asyncio
 import wave
-from db import get_announce_channel_id, get_announce_style
+
 from collections import defaultdict, deque
+from discord import VoiceClient
+
+from db import get_announce_channel_id, get_announce_style
 from utils import resolve_display_data 
 
 
@@ -271,24 +274,22 @@ async def start_heartbeat_loop(bot, guild):
                 logging.warning(f"⚠️ Heartbeat failed: {e}")
                 await asyncio.sleep(10)
                 
-                
+
 async def audio_queue_worker(bot: discord.Client, guild: discord.Guild):
     while True:
         queue = audio_queues[guild.id]
-        # if queue and guild.voice_client and not guild.voice_client.is_playing():
-        
         voice_client = discord.utils.get(bot.voice_clients, guild=guild)
-        if queue and voice_client and not voice_client.is_playing():
 
+        if queue and isinstance(voice_client, VoiceClient) and not voice_client.is_playing():
             filepath = queue.popleft()
             try:
                 source = SimpleAudioSource(filepath)
-                guild.voice_client.play(
+                voice_client.play(
                     source,
                     after=lambda e: logging.info(f"✅ Finished playing {filepath}") if not e else logging.error(f"🎧 Error: {e}")
                 )
                 logging.info(f"🔊 Playing from queue: {filepath}")
-            except Exception as e:
+            except Exception:
                 logging.exception(f"💥 Failed to play {filepath}")
         await asyncio.sleep(1)
 
@@ -297,3 +298,55 @@ def enqueue_sound(guild: discord.Guild, file_path: str):
     if os.path.isfile(file_path):
         audio_queues[guild.id].append(file_path)
         logging.info(f"🎶 Queued sound: {file_path}")
+
+
+async def announce_streak_break(bot: discord.Client, character: str, guild: discord.Guild):
+    """📣 Announcement of the interruption of the series of victories"""
+    channel_id = get_announce_channel_id()
+    if not channel_id:
+        logging.warning("❗ Announce channel ID not set.")
+        return
+    
+    channel = bot.get_channel(channel_id)
+    if not isinstance(channel, discord.TextChannel):
+        logging.warning(f"❗ Announce channel is not a TextChannel (ID: {channel_id})")
+        return
+
+    try:
+        display = await resolve_display_data(character, guild)
+        name = display.get("display_name", character)
+        avatar_url = display.get("avatar_url")
+        color = display.get("color", discord.Color.red())
+    except Exception as e:
+        logging.warning(f"⚠️ Could not resolve display data for {character}: {e}")
+        name = character
+        avatar_url = None
+        color = discord.Color.red()
+
+    embed = discord.Embed(
+        title="💀 STREAK BROKEN!",
+        description=f"**{name.upper()}**'s killstreak has ended.",
+        color=color
+    )
+    if avatar_url:
+        embed.set_thumbnail(url=avatar_url)
+
+    try:
+        await channel.send(embed=embed)
+        logging.info(f"📣 Streak break embed sent for {name}")
+    except Exception as e:
+        logging.exception(f"❌ Failed to send streak break embed for {name}: {e}")
+
+    # 🎵 Sound
+    try:
+        if SOUNDS_DIR:
+            sound_file = os.path.join(SOUNDS_DIR, "obezhiren.wav")
+            if os.path.isfile(sound_file):
+                enqueue_sound(guild, sound_file)
+                logging.info(f"🔊 Queued sound for streak break: {sound_file}")
+            else:
+                logging.warning(f"⚠️ Streak break sound not found: {sound_file}")
+        else:
+            logging.warning("❗ SOUNDS_DIR not configured.")
+    except Exception as e:
+        logging.exception("❌ Failed to queue streak break sound")

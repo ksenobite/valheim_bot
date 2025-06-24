@@ -36,12 +36,12 @@ def find_role_name_by_wins(wins: int) -> Optional[str]:
     roles = get_all_rank_roles()  # list of (threshold, role)
     if not roles:
         return None
-    # От большего к меньшему
+    # From more to less
     for threshold, role_name in roles:
         if wins >= threshold:
             return role_name
-    # Если ни один порог не подошел — вернуть самую низкую роль
-    return roles[-1][1]  # Минимальная роль (последняя в списке)
+    # If none of the thresholds are met, return the lowest role.
+    return roles[-1][1]  # Minimum role (last in the list)
 
 
 async def assign_role_based_on_wins(member: discord.Member, days: int = 7):
@@ -93,29 +93,57 @@ async def update_roles_for_all_members(bot: discord.Client, days: int = 7):
 
 
 async def update_mmr_roles(bot: discord.Client):
+    """
+    🔁 Assigns Glicko-2 based roles to users according to their average rating.
+    """
     roles = get_all_mmr_roles()
     if not roles:
         logging.info("📭 No MMR roles configured.")
         return
+
     guild = discord.utils.get(bot.guilds)
     if not guild:
         logging.warning("❗ Bot is not in a guild.")
         return
 
     for member in guild.members:
+        if member.bot:
+            continue
+
         characters = get_user_characters(member.id)
         if not characters:
             continue
-        mmr = get_user_mmr(member.id)
-        if mmr is None:
+
+        # 🔎 Collect Glicko ratings for each character
+        mmrs = []
+        for char in characters:
+            rating, _, _ = get_glicko_rating(char)
+            mmrs.append(rating)
+
+        if not mmrs:
             continue
-        role_to_assign = None
-        for threshold, role_name in roles:
-            if mmr >= threshold:
-                role_to_assign = discord.utils.get(guild.roles, name=role_name)
-        if role_to_assign and role_to_assign not in member.roles:
-            try:
-                await member.add_roles(role_to_assign)
-                logging.info(f"✅ Assigned {role_to_assign.name} to {member.display_name}")
-            except Exception as e:
-                logging.warning(f"❌ Failed to assign role: {e}")
+
+        avg_mmr = sum(mmrs) / len(mmrs)
+
+        # 🧱 Find matching role
+        matched_role = None
+        for threshold, role_name in sorted(roles, key=lambda x: x[0], reverse=True):
+            if avg_mmr >= threshold:
+                matched_role = discord.utils.get(guild.roles, name=role_name)
+                break
+
+        if not matched_role:
+            continue
+
+        # 🧹 Remove outdated roles
+        mmr_role_names = [rname for _, rname in roles]
+        current_roles = [r for r in member.roles if r.name in mmr_role_names]
+
+        try:
+            if matched_role not in current_roles:
+                await member.remove_roles(*current_roles, reason="Glicko MMR role update")
+                await member.add_roles(matched_role, reason="Glicko MMR role update")
+                logging.info(f"✅ Assigned '{matched_role.name}' to {member.display_name} ({avg_mmr:.1f})")
+        except Exception as e:
+            logging.warning(f"❌ Failed to assign role to {member.display_name}: {e}")
+

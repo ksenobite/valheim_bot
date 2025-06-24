@@ -6,8 +6,8 @@ import discord
 import logging
 import sqlite3
 
-from discord import app_commands, Interaction
-from typing import Optional
+from discord import app_commands, Interaction, Member
+from typing import Optional, cast
 from operator import itemgetter
 from datetime import datetime, timedelta
 
@@ -57,11 +57,11 @@ def safe_display_name(member: discord.Member) -> str:
 
 
 async def require_admin(interaction: discord.Interaction) -> bool:
-    if not interaction.user.guild_permissions.administrator:
+    user = cast(Member, interaction.user)
+    if not user.guild_permissions.administrator:
         await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
         return False
     return True
-
 
 async def check_positive(interaction: discord.Interaction, **kwargs):
     for name, value in kwargs.items():
@@ -110,6 +110,11 @@ async def resolve_display_data(character_name: str, guild: discord.Guild) -> dic
 
 
 async def generate_stats_embeds(interaction: discord.Interaction, characters: list[str], days: int, avatar_url=None, target_user_id: Optional[int] = None):
+    if not interaction.guild:
+        await interaction.response.send_message("❌ This command must be used in a server (guild).", ephemeral=True)
+        return
+    guild = interaction.guild
+
     since = datetime.utcnow() - timedelta(days=days)
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
@@ -132,7 +137,7 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
             for killer, count in c.fetchall():
                 defeats[killer] = defeats.get(killer, 0) + count
 
-    # 📊 Statistics processing
+    # 📊 Stats computation
     all_opponents = set(victories) | set(defeats)
     stats = []
     for opponent in all_opponents:
@@ -142,9 +147,8 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
         winlos = wins / losses if losses > 0 else wins
         winrate = (wins / total) * 100 if total else 0
         stats.append((opponent, wins, losses, winlos, winrate))
-        
-    # ⬇️  Inserting the CORRECT sorting before pagination
-    stats.sort(key=itemgetter(4))  # by winrate in ascending order
+
+    stats.sort(key=itemgetter(4))  # by winrate
 
     total_wins = sum(victories.values())
     total_losses = sum(defeats.values())
@@ -152,47 +156,29 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
     overall_winlos = total_wins / total_losses if total_losses > 0 else total_wins
     overall_winrate = (total_wins / total_matches) * 100 if total_matches else 0
     emoji_summary = get_winrate_emoji(overall_winrate)
-    
-    # 🧾 Pagination
+
     page_size = 10
     embeds = []
     for start in range(0, len(stats), page_size):
-        embed = discord.Embed(
-            color=discord.Color.blue()
-        )
+        embed = discord.Embed(color=discord.Color.blue())
         embed.set_author(
             name=f"📊 Stats for {len(characters)} character(s) in {days} day(s)",
-            icon_url = avatar_url if avatar_url else None
+            icon_url=avatar_url if avatar_url else None
         )
 
-        for opponent, wins, losses, winlos, winrate in sorted(stats[start:start+page_size], key=itemgetter(4), reverse=False):
-            display_data = await resolve_display_data(opponent, interaction.guild)
+        for opponent, wins, losses, winlos, winrate in sorted(stats[start:start + page_size], key=itemgetter(4), reverse=False):
+            display_data = await resolve_display_data(opponent, guild)
             emoji = get_winrate_emoji(winrate)
             embed.add_field(
                 name=f"{emoji} **{display_data['display_name'].upper()}**",
                 value=f"Wins: `{wins}`\tLosses: `{losses}`\nWinlos: `{winlos:.1f}`\tWinrate: `{winrate:.1f}%`",
                 inline=False
             )
-            
-        
-        if target_user_id:
-            chars = get_user_characters(target_user_id)
-        else:
-            chars = characters
 
+        chars = get_user_characters(target_user_id) if target_user_id else characters
 
-        # mmrs = [get_mmr(c) for c in chars]
-        # avg_mmr = round(sum(mmrs) / len(mmrs)) if mmrs else None
-
-        
-        mmrs = []
-        for c in chars:
-            glicko = get_glicko_rating(c)
-            if glicko:
-                mmrs.append(glicko[0])
+        mmrs = [get_glicko_rating(c)[0] for c in chars if get_glicko_rating(c)]
         avg_mmr = round(sum(mmrs) / len(mmrs)) if mmrs else None
-        
-        
         mmr_line = f"`{avg_mmr}`\n" if avg_mmr is not None else ""
 
         summary = (
@@ -203,19 +189,17 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
             f"MMR: {mmr_line}"
         )
 
-        # If there is only one character, add the final points:
-        if len(characters) == 1:
-            total = get_total_wins(characters[0])
-            manual, natural = get_win_sources(characters[0])
+        embed.add_field(name="**🔍 SUMMARY: **", value=summary, inline=False)
 
-        embed.add_field(
-            name="**🔍 SUMMARY: **",
-            value=summary,
-            inline=False
-        )
-        
-        manual, natural = get_win_sources(characters[0])
-        total = manual + natural
+        # 🧮 Aggregate manual points
+        manual = 0
+        natural = 0
+        for char in characters:
+            m, n = get_win_sources(char)
+            manual += m
+            natural += n
+
+        # 🏁 Add final points summary
         embed.add_field(
             name=f"\n**🏅 TOTAL POINTS: **`{total_wins + manual}`",
             value=f"Frags: `{total_wins}`\nExtra: `{manual}`",
@@ -230,16 +214,13 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
 async def generate_topmmr_embeds(interaction: Interaction, leaderboard_data: list, public: bool = False, details: bool = False):
     """
     leaderboard_data: list of tuples
-    [
-        (display_name, avatar_url, characters, mmr, fights, wins, losses, winrate, recent_days),
-        ...
-    ]
+    [(display_name, avatar_url, characters, mmr, fights, wins, losses, winrate, recent_days),...]
     """
     embeds = []
     medals = {1: "🥇", 2: "🥈", 3: "🥉"}
 
     author_text = f"🏆 Top MMR"
-    color = discord.Color.gold()  # фиксированный цвет для Glicko-лидерборда
+    color = discord.Color.gold()
 
     page_size = 10
     for start in range(0, len(leaderboard_data), page_size):
@@ -258,7 +239,6 @@ async def generate_topmmr_embeds(interaction: Interaction, leaderboard_data: lis
             winlos = f"{wins}/{losses}"
             winrate_str = f"{winrate:.1f}%"
 
-            # 🎯 Активность: цвет + сколько дней назад
             if recent_days <= 3:
                 activity = f"🟢 `{recent_days}d ago`"
             elif recent_days <= 7:

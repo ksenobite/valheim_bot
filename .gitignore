@@ -1,6 +1,7 @@
 __pycache__/
 dist/
 build/
+.vscode/
 *.log
 *.db
 .env

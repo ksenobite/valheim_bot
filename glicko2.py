@@ -3,11 +3,11 @@
 import math
 
 class Player:
-    def __init__(self, rating=1500, rd=350, vol=0.06):
+    def __init__(self, rating: float = 1500.0, rd: float = 350.0, vol: float = 0.06):
         self._rating = rating
         self._rd = rd
         self._vol = vol
-        self._tau = 0.5  # волатильность — можно адаптировать под ваш PvP
+        self._tau = 0.5  # volatility — can be adapted to your PvP
 
     def getRating(self):
         return self._rating
@@ -16,7 +16,7 @@ class Player:
         return self._rd
 
     def pre_rating_period(self):
-        c = 34.6  # рост неопределенности с течением времени (настройка decay)
+        c = 34.6  # increasing uncertainty over time (setting decay)
         self._rd = min(math.sqrt(self._rd ** 2 + c ** 2), 350)
 
     def _g(self, rd):
@@ -35,24 +35,24 @@ class Player:
         g_list = [1 / math.sqrt(1 + 3 * (phi_j ** 2) / (math.pi ** 2)) for phi_j in opp_phi]
         E_list = [1 / (1 + math.exp(-g * (mu - mu_j))) for g, mu_j in zip(g_list, opp_mu)]
 
-        # Шаг 2: вычисляем дисперсию
+        # Step 2: Calculate the variance
         v_inv = sum((g ** 2) * E * (1 - E) for g, E in zip(g_list, E_list))
         v = 1 / v_inv
 
-        # Шаг 3: вычисляем дельту
+        # Step 3: Calculate the delta
         delta = v * sum(g * (s - E) for g, s, E in zip(g_list, outcome_list, E_list))
 
-        # Шаг 4: пропустим обновление волатильности (для упрощения)
-
-        # Шаг 5: phi*
+        # Step 4: Skip the volatility update (to simplify)
+        
+        # Step 5: PHI*
         phi_star = math.sqrt(phi ** 2 + self._vol ** 2)
 
-        # Шаг 6: новое значение phi
+        # Step 6: New PHI value
         phi_new = 1 / math.sqrt((1 / (phi_star ** 2)) + (1 / v))
 
-        # Шаг 7: новое значение mu
+        # Step 7: New MU value
         mu_new = mu + (phi_new ** 2) * sum(g * (s - E) for g, s, E in zip(g_list, outcome_list, E_list))
 
-        # Шаг 8: обратно к рейтингу
+        # Step 8: Back to Rating
         self._rating = 173.7178 * mu_new + 1500
         self._rd = 173.7178 * phi_new

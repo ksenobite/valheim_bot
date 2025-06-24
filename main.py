@@ -64,6 +64,7 @@ else:
 
 init_db()
 init_rank_roles_table()
+init_mmr_roles_table()
 
 clear_deathless_streaks()
 
@@ -129,6 +130,10 @@ async def on_message(message):
                 del killstreaks[victim]
 
             add_frag(killer, victim)
+            
+            # 🔻 Announce streak break if victim had a deathless streak
+            if get_deathless_streak(victim) >= 3:
+                await announce_streak_break(bot, victim, message.guild)
 
             # --- Deathless streak logic ---
             new_count = update_deathless_streaks(killer, victim)
@@ -137,14 +142,24 @@ async def on_message(message):
                 await play_deathless_sound(bot, new_count, message.guild)
 
         # --- [2] Checking for a single death (for example, by nature or suicide) ---
+        
         elif (match := re.match(r"^(.+?) is dead$", content)):
             victim = match.group(1).strip().lower()
             if victim:
                 logging.info(f"💀 '{victim}' died without a killer. Resetting deathless streak.")
                 try:
-                    reset_deathless_streak(victim)
+                    had_streak = reset_deathless_streak(victim)
                 except Exception as e:
                     logging.exception(f"❌ Failed to reset deathless streak for '{victim}': {e}")
+                    had_streak = False
+
+                # 💥 If there was an active episode , we will announce its termination
+                if had_streak:
+                    try:
+                        await announce_streak_break(bot, victim, message.guild)
+                    except Exception as e:
+                        logging.exception(f"❌ Failed to announce streak break for '{victim}': {e}")
+
                 if victim in killstreaks:
                     del killstreaks[victim]
             else:
