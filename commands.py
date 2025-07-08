@@ -1025,10 +1025,10 @@ def setup_commands(bot: commands.Bot):
 
         # 🥇 Sorting: first by MMR, then by wins, then by name
         leaderboard_data.sort(key=lambda x: (-x[3], -x[5], x[0]))
-        leaderboard_data = leaderboard_data[:count]
 
         # 🔹 Short output
         if not details:
+            leaderboard_data = leaderboard_data[:count]
             embeds = await generate_topmmr_embeds(interaction, leaderboard_data, public=public, details=False)
 
             if not embeds:

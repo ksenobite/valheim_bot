@@ -62,20 +62,6 @@ def init_db():
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )""")
         
-        c.execute("""CREATE TABLE IF NOT EXISTS mmr_history (
-                character TEXT,
-                delta INTEGER,
-                reason TEXT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        c.execute("""CREATE TABLE IF NOT EXISTS last_win (
-                character TEXT PRIMARY KEY,
-                last_win TIMESTAMP
-            )
-        """)
-        
         c.execute("""CREATE TABLE IF NOT EXISTS glicko_ratings (
             character TEXT PRIMARY KEY,
             rating REAL DEFAULT 1500,

@@ -7,3 +7,5 @@ build/
 .env
 *.exe
 *.spec
+NOTES.md
+STATE.md
