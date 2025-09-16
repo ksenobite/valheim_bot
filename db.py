@@ -450,38 +450,73 @@ def rebuild_last_win():
 # --- GLICKO-2 ---
 
 def get_glicko_rating(character: str) -> tuple[float, float, float]:
+    """🔎 Backward-compatible wrapper for old calls (rating, rd, vol)."""
+    rating, rd, vol, _ = get_glicko_rating_extended(character)
+    return rating, rd, vol
+
+
+def get_glicko_rating_extended(character: str) -> tuple[float, float, float, Optional[str]]:
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
         c.execute("""
-            SELECT rating, rd, vol FROM glicko_ratings WHERE character = ?
+            SELECT rating, rd, vol, last_activity FROM glicko_ratings WHERE character = ?
         """, (character.lower(),))
         row = c.fetchone()
-        return row if row else (1500.0, 350.0, 0.06)
+        if row:
+            return row[0], row[1], row[2], row[3]
+        return 1500.0, 350.0, 0.06, None
 
 
-def set_glicko_rating(character: str, rating: float, rd: float, vol: float):
+def set_glicko_rating(character: str, rating: float, rd: float, vol: float, last_activity: Optional[str] = None):
     with sqlite3.connect(get_db_path()) as conn:
-        conn.execute("""
-            INSERT OR REPLACE INTO glicko_ratings (character, rating, rd, vol)
-            VALUES (?, ?, ?, ?)
-        """, (character.lower(), rating, rd, vol))
+        if last_activity:
+            conn.execute("""
+                INSERT OR REPLACE INTO glicko_ratings (character, rating, rd, vol, last_activity)
+                VALUES (?, ?, ?, ?, ?)
+            """, (character.lower(), rating, rd, vol, last_activity))
+        else:
+            conn.execute("""
+                INSERT OR REPLACE INTO glicko_ratings (character, rating, rd, vol, last_activity)
+                VALUES (?, ?, ?, ?, COALESCE(
+                    (SELECT last_activity FROM glicko_ratings WHERE character = ?),
+                    NULL
+                ))
+            """, (character.lower(), rating, rd, vol, character.lower()))
         conn.commit()
 
 
 def update_glicko_ratings(killer: str, victim: str):
-    """🔁 Update Glicko-2 rating for both players after a kill."""
+    """🔁 Update Glicko-2 rating for both players after a kill and set last_activity to now."""
     killer = killer.lower()
     victim = victim.lower()
+    now = datetime.utcnow()
+    now_iso = now.isoformat()
 
-    p1 = Player(*get_glicko_rating(killer))
-    p2 = Player(*get_glicko_rating(victim))
+    def prepare_player(name: str) -> Player:
+        rating, rd, vol, last_act = get_glicko_rating_extended(name)
+        p = Player(rating, rd, vol)
+
+        # 📉 Decay for inactivity (apply pre_rating_period for each missing day)
+        if last_act:
+            try:
+                days_since = (now.date() - datetime.fromisoformat(last_act).date()).days
+                for _ in range(max(0, days_since)):
+                    p.pre_rating_period()
+            except Exception as e:
+                logging.warning(f"⚠️ Failed to apply decay for {name}: {e}")
+
+        return p
+
+    p1 = prepare_player(killer)
+    p2 = prepare_player(victim)
 
     # 🧠 Killer wins, victim loses
     p1.update_player([p2.getRating()], [p2.getRd()], [1])
     p2.update_player([p1.getRating()], [p1.getRd()], [0])
 
-    set_glicko_rating(killer, p1.getRating(), p1.getRd(), p1._vol)
-    set_glicko_rating(victim, p2.getRating(), p2.getRd(), p2._vol)
+    # 📝 Save with updated last_activity
+    set_glicko_rating(killer, p1.getRating(), p1.getRd(), p1._vol, last_activity=now_iso)
+    set_glicko_rating(victim, p2.getRating(), p2.getRd(), p2._vol, last_activity=now_iso)
 
 
 def get_user_glicko_mmr(discord_id: int) -> Optional[int]:
@@ -523,16 +558,31 @@ def get_fight_stats(character: str, since: datetime) -> tuple[int, int, int]:
         return wins, losses, wins + losses
 
 
-def get_last_active_day(character: str) -> Optional[date]:
+def get_last_active_iso(character: str) -> Optional[str]:
+    """
+    Return the ISO datetime string of the last activity (max timestamp) for a character,
+    or None if there are no frags.
+    """
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
         c.execute("""
             SELECT MAX(timestamp) FROM frags
             WHERE killer = ? OR victim = ?
         """, (character.lower(), character.lower()))
-        result = c.fetchone()[0]
-        if result:
-            return datetime.fromisoformat(result).date()
+        row = c.fetchone()[0]
+        # row is either None or ISO string (as stored)
+        return row if row else None
+
+
+def get_last_active_day(character: str) -> Optional[date]:
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute("""
+            SELECT last_activity FROM glicko_ratings WHERE character = ?
+        """, (character.lower(),))
+        result = c.fetchone()
+        if result and result[0]:
+            return datetime.fromisoformat(result[0]).date()
         return None
 
 

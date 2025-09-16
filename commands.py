@@ -878,11 +878,13 @@ def setup_commands(bot: commands.Bot):
                         player.pre_rating_period()
 
                 current_date += timedelta(days=1)
-
+                    
             # ✅ Saving the results
             with sqlite3.connect(get_db_path()) as conn:
                 for name, player in all_players.items():
-                    set_glicko_rating(name, player.getRating(), player.getRd(), player._vol)
+                    # get the latest frag timestamp for this character (ISO string), if any
+                    last_act = get_last_active_iso(name)
+                    set_glicko_rating(name, player.getRating(), player.getRd(), player._vol, last_activity=last_act)
 
             await interaction.followup.send("✅ Glicko-2 MMR sync complete!", ephemeral=True)
             logging.info("✅ Glicko-2 MMR synced successfully.")
