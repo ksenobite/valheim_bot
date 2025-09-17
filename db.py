@@ -612,46 +612,55 @@ def get_last_active_iso(character: str, event_id: Optional[int] = None) -> Optio
 def get_last_active_day(character: str, event_id: Optional[int] = None) -> Optional[date]:
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
-        c.execute("""
-            SELECT last_activity FROM glicko_ratings
-            WHERE character = ? AND (? IS NULL OR event_id = ?)
-        """, (character.lower(), event_id, event_id))
-        result = c.fetchone()
-        if result and result[0]:
-            return datetime.fromisoformat(result[0]).date()
+        if event_id:
+            c.execute("""
+                SELECT MAX(timestamp) FROM frags
+                WHERE (killer = ? OR victim = ?) AND event_id = ?
+            """, (character.lower(), character.lower(), event_id))
+        else:
+            c.execute("""
+                SELECT MAX(timestamp) FROM frags
+                WHERE killer = ? OR victim = ?
+            """, (character.lower(), character.lower()))
+        result = c.fetchone()[0]
+        if result:
+            return datetime.fromisoformat(result).date()
         return None
 
-def get_all_players(event_id: int) -> set:
-    """
-    Returns unique players within the event_id:
-    - Discord IDs (int) for related users
-    - Character names (str) for unrelated users
+def get_all_players(event_id: Optional[int] = None) -> set:
+    """Return set of discord_ids (int) and unlinked character names (str) for the given event_id.
+       If event_id is None -> return global set (backwards compatible).
     """
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
+        if event_id:
+            # characters that participated in this event
+            c.execute("SELECT DISTINCT killer FROM frags WHERE event_id = ?", (event_id,))
+            killers = {row[0].lower() for row in c.fetchall()}
+            c.execute("SELECT DISTINCT victim FROM frags WHERE event_id = ?", (event_id,))
+            victims = {row[0].lower() for row in c.fetchall()}
+        else:
+            c.execute("SELECT DISTINCT killer FROM frags")
+            killers = {row[0].lower() for row in c.fetchall()}
+            c.execute("SELECT DISTINCT victim FROM frags")
+            victims = {row[0].lower() for row in c.fetchall()}
 
-        # Linked Discord users (everything, globally, 
-        # because the user<->char connection does not depend on the event)
-        c.execute("SELECT DISTINCT discord_id FROM character_map")
-        discord_ids = {row[0] for row in c.fetchall() if row[0] is not None}
+        all_chars = killers | victims
 
-        # All characters from frags in this event
-        c.execute("SELECT DISTINCT killer FROM frags WHERE event_id = ?", (event_id,))
-        killers = {row[0].lower() for row in c.fetchall()}
+        # map characters -> discord_id (only those present in character_map)
+        if not all_chars:
+            return set()
 
-        c.execute("SELECT DISTINCT victim FROM frags WHERE event_id = ?", (event_id,))
-        victims = {row[0].lower() for row in c.fetchall()}
+        placeholders = ",".join("?" for _ in all_chars)
+        q = f"SELECT character, discord_id FROM character_map WHERE character IN ({placeholders})"
+        c.execute(q, tuple(all_chars))
+        mapped = {row[0].lower(): row[1] for row in c.fetchall()}
 
-        all_characters = killers | victims
+        discord_ids = set(mapped.values())
+        mapped_chars = set(mapped.keys())
+        unlinked_chars = all_chars - mapped_chars
 
-        # Characters that are in character_map (globally)
-        c.execute("SELECT DISTINCT character FROM character_map")
-        mapped_chars = {row[0].lower() for row in c.fetchall()}
-
-        # Unlinked only within this event
-        unlinked_characters = all_characters - mapped_chars
-
-        return discord_ids | unlinked_characters
+        return discord_ids | unlinked_chars
 
 def get_user_glicko_rating(discord_id: Optional[int] = None) -> Optional[float]:
     characters = get_user_characters(discord_id)
@@ -810,7 +819,7 @@ def clear_event_channels(event_name: str):
 def list_events() -> list[tuple]:
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
-        c.execute("SELECT id, name, description, created_at FROM events ORDER BY created_at DESC")
+        c.execute("SELECT id, name, description FROM events ORDER BY created_at DESC")
         return c.fetchall()
 
 def get_default_event_id() -> int:
@@ -852,3 +861,15 @@ def ensure_default_event():
             c.execute("INSERT INTO settings (key, value) VALUES ('default_event', 'arena')")
             conn.commit()
             logging.info("✅ Default event set to 'arena'")
+
+def get_event_channel(event_id: int, channel_type: str) -> Optional[int]:
+    with sqlite3.connect(get_db_path()) as conn:
+        c = conn.cursor()
+        c.execute("""
+            SELECT channel_id FROM event_channels
+            WHERE event_id = ? AND channel_type = ?
+        """, (int(event_id), channel_type))
+        row = c.fetchone()
+        logging.debug(f"DEBUG get_event_channel(event_id={event_id}, channel_type={channel_type}) -> {row}")
+        return int(row[0]) if row else None
+

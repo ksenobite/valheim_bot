@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from typing import Optional
 from discord import VoiceClient
 
-from db import get_announce_channel_id, get_announce_style
+from db import get_announce_channel_id, get_announce_style, get_event_channel
 from utils import resolve_display_data 
 
 SOUNDS_DIR = None
@@ -85,103 +85,150 @@ def set_sounds_path(path):
     else:
         logging.info(f"🎵 Using sounds from: {SOUNDS_DIR}")
 
-async def send_killstreak_announcement(bot, killer: str, count: int):
-    channel_id = get_announce_channel_id()
+async def send_killstreak_announcement(
+    bot: discord.Client,
+    killer: str,
+    streak_count: int,
+    guild: Optional[discord.Guild] = None,
+    event_id: Optional[int] = None
+):
+    """📣 Announcement about killstreaks (double kill, triple kill, etc.)"""
+
+    logging.info(f"[KILLSTREAK] called for killer={killer}, streak={streak_count}, event_id={event_id}")
+
+    channel_id = None
+    try:
+        channel_id = get_event_channel(int(event_id), "announce") if event_id else None
+        logging.debug(f"[KILLSTREAK] get_event_channel(event_id={event_id}, 'announce') -> {channel_id}")
+    except Exception as e:
+        logging.exception(f"[KILLSTREAK] Failed to resolve announce channel for event_id={event_id}: {e}")
+
     if not channel_id:
-        logging.warning("❗ Announce channel ID not set.")
+        logging.warning(f"[KILLSTREAK] ❗ Announce channel ID not set (event_id={event_id})")
         return
 
     channel = bot.get_channel(channel_id)
-    if not channel:
-        logging.warning(f"❗ Announce channel not found (ID: {channel_id}).")
+    logging.debug(f"[KILLSTREAK] bot.get_channel({channel_id}) -> {channel}")
+
+    if not channel or not isinstance(channel, discord.TextChannel):
+        logging.warning(f"[KILLSTREAK] ❗ Announce channel not found or not a TextChannel (ID: {channel_id})")
         return
 
-    style_name = get_announce_style()
-    style = KILLSTREAK_STYLES.get(style_name)
-    if not style:
-        logging.warning(f"❗ Unknown announce style: {style_name}")
-        return
+    resolved_guild = guild or getattr(channel, "guild", None)
+    logging.debug(f"[KILLSTREAK] resolved guild -> {resolved_guild}")
 
-    data = style.get(count)
-    if not data:
-        return  # Not announcing for this kill count
-
-    # Getting information about the killer
     try:
-        guild = channel.guild
-        display = await resolve_display_data(killer, guild)
+        display = await resolve_display_data(killer, resolved_guild)
+        logging.debug(f"[KILLSTREAK] resolve_display_data({killer}) -> {display}")
         name = display.get("display_name", killer)
         avatar_url = display.get("avatar_url")
-        color = display.get("color", discord.Color.default())
+        color = display.get("color", discord.Color.orange())
     except Exception as e:
-        logging.warning(f"⚠️ Could not resolve display data for {killer}: {e}")
+        logging.warning(f"[KILLSTREAK] ⚠️ Could not resolve display data for {killer}: {e}")
         name = killer
         avatar_url = None
-        color = discord.Color.default()
+        color = discord.Color.orange()
 
-    # Creating an embed announcement
+    embed = discord.Embed(
+        title=f"🔥 {streak_count} KILL STREAK!",
+        description=f"**{name.upper()}** is on fire with a {streak_count}-kill streak!",
+        color=color
+    )
+    if avatar_url:
+        embed.set_thumbnail(url=avatar_url)
+
     try:
-        embed = discord.Embed(
-            title=data["title"],
-            description=f"**{name.upper()}** is on a killstreak!",
-            color=color
-        )
-        if avatar_url:
-            embed.set_thumbnail(url=avatar_url)
-
         await channel.send(embed=embed)
-        logging.info(f"📣 Killstreak embed announcement sent: {data['title']} by {name}")
+        logging.info(f"[KILLSTREAK] 📣 Killstreak embed sent for {name} to channel {channel.id}")
     except Exception as e:
-        logging.exception(f"❌ Failed to send killstreak embed announcement: {e}")
+        logging.exception(f"[KILLSTREAK] ❌ Failed to send killstreak embed for {name}: {e}")
 
-async def send_deathless_announcement(bot, killer: str, count: int):
-    channel_id = get_announce_channel_id()
+    # 🎵 Sound (only if needed)
+    try:
+        if SOUNDS_DIR and isinstance(SOUNDS_DIR, str):
+            logging.debug(f"[KILLSTREAK] Sound dir = {SOUNDS_DIR}, streak_count={streak_count}")
+            await play_killstreak_sound(bot, streak_count, resolved_guild)
+        else:
+            logging.warning("[KILLSTREAK] ❗ SOUNDS_DIR not configured.")
+    except Exception as e:
+        logging.exception("[KILLSTREAK] ❌ Failed to play killstreak sound")
+
+async def send_deathless_announcement(
+    bot: discord.Client,
+    killer: str,
+    count: int,
+    guild: Optional[discord.Guild] = None,
+    event_id: Optional[int] = None
+):
+    """📣 Announce when a player reaches a deathless streak."""
+
+    logging.info(f"[DEATHLESS] called for killer={killer}, count={count}, event_id={event_id}")
+
+    # --- Find channel ---
+    channel_id = None
+    try:
+        if event_id is not None:
+            channel_id = get_event_channel(event_id, "announce")
+            logging.debug(f"[DEATHLESS] get_event_channel(event_id={event_id}, 'announce') -> {channel_id}")
+        else:
+            channel_id = get_announce_channel_id()  # legacy fallback
+            logging.debug(f"[DEATHLESS] legacy get_announce_channel_id() -> {channel_id}")
+    except Exception as e:
+        logging.exception(f"[DEATHLESS] Failed to resolve announce channel (event_id={event_id}): {e}")
+
     if not channel_id:
-        logging.warning("❗ Announce channel ID not set.")
+        logging.warning(f"[DEATHLESS] ❗ Announce channel ID not set (event_id={event_id})")
         return
 
     channel = bot.get_channel(channel_id)
-    if not channel:
-        logging.warning(f"❗ Announce channel not found (ID: {channel_id}).")
+    logging.debug(f"[DEATHLESS] bot.get_channel({channel_id}) -> {channel}")
+
+    if not channel or not isinstance(channel, discord.TextChannel):
+        logging.warning(f"[DEATHLESS] ❗ Announce channel not found or not a TextChannel (ID={channel_id})")
         return
 
+    # --- Resolve style ---
     style_name = get_announce_style()
     style = DEATHLESS_STYLES.get(style_name)
+    logging.debug(f"[DEATHLESS] announce style -> {style_name}")
+
     if not style:
-        logging.warning(f"❗ Unknown announce style for deathless streak: {style_name}")
+        logging.warning(f"[DEATHLESS] ❗ Unknown announce style for deathless streak: {style_name}")
         return
 
     data = style.get(count)
     if not data:
-        return  # No announcement for this streak count
+        logging.debug(f"[DEATHLESS] No announcement for streak count={count}")
+        return
 
-    # Getting information about the player
+    # --- Player display ---
+    resolved_guild = guild or channel.guild
     try:
-        guild = channel.guild
-        display = await resolve_display_data(killer, guild)
+        display = await resolve_display_data(killer, resolved_guild)
+        logging.debug(f"[DEATHLESS] resolve_display_data({killer}) -> {display}")
         name = display.get("display_name", killer)
         avatar_url = display.get("avatar_url")
         color = display.get("color", discord.Color.default())
     except Exception as e:
-        logging.warning(f"⚠️ Could not resolve display data for {killer}: {e}")
+        logging.warning(f"[DEATHLESS] ⚠️ Could not resolve display data for {killer}: {e}")
         name = killer
         avatar_url = None
         color = discord.Color.default()
 
-    # Embed Create
-    try:
-        embed = discord.Embed(
-            title=data["title"],
-            description=f"**{name.upper()}** is on a deathless streak!",
-            color=color
-        )
-        if avatar_url:
-            embed.set_thumbnail(url=avatar_url)
+    # --- Embed ---
+    embed = discord.Embed(
+        title=data["title"],
+        description=f"**{name.upper()}** is on a deathless streak!",
+        color=color
+    )
+    if avatar_url:
+        embed.set_thumbnail(url=avatar_url)
 
+    try:
         await channel.send(embed=embed)
-        logging.info(f"📣 Deathless streak embed announcement sent: {data['title']} by {name}")
+        logging.info(f"[DEATHLESS] 📣 Deathless streak embed sent: {data['title']} by {name} to channel {channel.id}")
     except Exception as e:
-        logging.exception(f"❌ Failed to send embed deathless streak announcement: {e}")
+        logging.exception(f"[DEATHLESS] ❌ Failed to send embed deathless streak announcement: {e}")
 
 async def play_killstreak_sound(bot, count: int, guild: Optional[discord.Guild] = None, event_id: Optional[int] = None):
     if not SOUNDS_DIR:
@@ -307,46 +354,46 @@ def enqueue_sound(guild: discord.Guild, file_path: str):
         audio_queues[guild.id].append(file_path)
         logging.info(f"🎶 Queued sound: {file_path}")
 
-async def announce_streak_break(bot: discord.Client, character: str, guild: Optional[discord.Guild] = None, event_id: Optional[int] = None):
+async def announce_streak_break(
+    bot: discord.Client,
+    character: str,
+    guild: Optional[discord.Guild] = None,
+    event_id: Optional[int] = None
+):
     """📣 Announcement of the interruption of the series of victories."""
-    # Try to resolve announce channel for event if function supports it
+
+    logging.info(f"[STREAK_BREAK] called for char={character}, event_id={event_id}")
+
     channel_id = None
     try:
-        # If db has get_announce_channel_id(event_id) signature — use it
-        channel_id = get_announce_channel_id(event_id)  # type: ignore
-    except TypeError:
-        # fallback to old signature
-        try:
-            channel_id = get_announce_channel_id()
-        except Exception:
-            channel_id = None
-    except Exception:
-        # any other error, try fallback
-        try:
-            channel_id = get_announce_channel_id()
-        except Exception:
-            channel_id = None
+        channel_id = get_event_channel(int(event_id), "announce") if event_id else None
+        logging.debug(f"[STREAK_BREAK] get_event_channel(event_id={event_id}, 'announce') -> {channel_id}")
+    except Exception as e:
+        logging.exception(f"[STREAK_BREAK] Failed to resolve announce channel for event_id={event_id}: {e}")
 
     if not channel_id:
-        logging.warning("❗ Announce channel ID not set for streak break.")
+        logging.warning(f"[STREAK_BREAK] ❗ Announce channel ID not set (event_id={event_id})")
         return
 
     channel = bot.get_channel(channel_id)
+    logging.debug(f"[STREAK_BREAK] bot.get_channel({channel_id}) -> {channel}")
+
     if not channel or not isinstance(channel, discord.TextChannel):
-        logging.warning(f"❗ Announce channel not found or not a TextChannel (ID: {channel_id}).")
+        logging.warning(f"[STREAK_BREAK] ❗ Announce channel not found or not a TextChannel (ID: {channel_id})")
         return
 
     # prefer guild from channel if none provided
     resolved_guild = guild or getattr(channel, "guild", None)
+    logging.debug(f"[STREAK_BREAK] resolved guild -> {resolved_guild}")
 
     try:
-        # resolve_display_data now accepts Optional[Guild]
         display = await resolve_display_data(character, resolved_guild)
+        logging.debug(f"[STREAK_BREAK] resolve_display_data({character}) -> {display}")
         name = display.get("display_name", character)
         avatar_url = display.get("avatar_url")
         color = display.get("color", discord.Color.red())
     except Exception as e:
-        logging.warning(f"⚠️ Could not resolve display data for {character}: {e}")
+        logging.warning(f"[STREAK_BREAK] ⚠️ Could not resolve display data for {character}: {e}")
         name = character
         avatar_url = None
         color = discord.Color.red()
@@ -361,20 +408,21 @@ async def announce_streak_break(bot: discord.Client, character: str, guild: Opti
 
     try:
         await channel.send(embed=embed)
-        logging.info(f"📣 Streak break embed sent for {name}")
+        logging.info(f"[STREAK_BREAK] 📣 Embed sent for {name} to channel {channel.id}")
     except Exception as e:
-        logging.exception(f"❌ Failed to send streak break embed for {name}: {e}")
+        logging.exception(f"[STREAK_BREAK] ❌ Failed to send streak break embed for {name}: {e}")
 
-    # 🎵 Sound: try to enqueue in the channel's guild
+    # 🎵 Sound
     try:
         if SOUNDS_DIR and isinstance(SOUNDS_DIR, str):
             sound_file = os.path.join(SOUNDS_DIR, "obezhiren.wav")
+            logging.debug(f"[STREAK_BREAK] Checking sound file: {sound_file}")
             if os.path.isfile(sound_file):
                 enqueue_sound(channel.guild, sound_file)
-                logging.info(f"🔊 Queued sound for streak break: {sound_file}")
+                logging.info(f"[STREAK_BREAK] 🔊 Queued sound for streak break: {sound_file}")
             else:
-                logging.warning(f"⚠️ Streak break sound not found: {sound_file}")
+                logging.warning(f"[STREAK_BREAK] ⚠️ Streak break sound not found: {sound_file}")
         else:
-            logging.warning("❗ SOUNDS_DIR not configured.")
+            logging.warning("[STREAK_BREAK] ❗ SOUNDS_DIR not configured.")
     except Exception as e:
-        logging.exception("❌ Failed to queue streak break sound")
+        logging.exception("[STREAK_BREAK] ❌ Failed to queue streak break sound")

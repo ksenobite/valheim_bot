@@ -1030,11 +1030,11 @@ def setup_commands(bot: commands.Bot):
                     days_ago = (datetime.utcnow().date() - last_active).days
                     recent_days.append(days_ago)
 
-            # ⚖️ Filtering
-            if total_fights < 10:
-                continue
-            if total_wins > 0 and total_losses == 0:
-                continue
+            # # ⚖️ Filtering
+            # if total_fights < 10:
+            #     continue
+            # if total_wins > 0 and total_losses == 0:
+            #     continue
 
             avg_mmr = round(sum(glicko_values) / len(glicko_values)) if glicko_values else 1500
             avg_active = min(recent_days) if recent_days else 999
@@ -1237,21 +1237,18 @@ def setup_commands(bot: commands.Bot):
                 f"⚠️ The event **{event}** had no fixed channels.", ephemeral=True
             )
 
-    @bot.tree.command(name="listevents", description="List of all events")
+    @bot.tree.command(name="listevents", description="List all events")
     async def listevents(interaction: discord.Interaction):
-        if not await require_admin(interaction):
-            return
-
         events = list_events()
         if not events:
-            await interaction.response.send_message("❌ There are no events created.", ephemeral=True)
+            await interaction.response.send_message("❌ No events found.", ephemeral=True)
             return
 
-        embed = discord.Embed(title="📜 List of events", color=discord.Color.gold())
+        embed = discord.Embed(title="📅 Events", color=discord.Color.blue())
         for eid, name, desc in events:
             embed.add_field(
-                name=f"🎯 {name} (ID: {eid})",
-                value=desc if desc else "—",
+                name=f"ID {eid}: {name}",
+                value=desc or "—",
                 inline=False
             )
 

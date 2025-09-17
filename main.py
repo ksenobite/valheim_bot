@@ -61,7 +61,6 @@ else:
 init_db()
 init_rank_roles_table()
 init_mmr_roles_table()
-
 clear_deathless_streaks()
 ensure_default_event() 
 
@@ -122,7 +121,9 @@ async def on_message(message: discord.Message):
 
     # Determine event by channel (new helper in db.py)
     try:
-        event_id = get_event_id_by_channel(channel.id)
+        event_id = get_event_id_by_channel(message.channel.id)
+        logging.info(f"DEBUG on_message channel={message.channel.id} event_id={event_id}")
+
     except Exception as e:
         logging.exception(f"❌ Failed to resolve event for channel {channel.id}: {e}")
         event_id = None
@@ -157,24 +158,17 @@ async def on_message(message: discord.Message):
                 killstreaks[ks_key_killer]["count"] = 1
             killstreaks[ks_key_killer]["last_kill_time"] = now
 
-        # announce killstreaks (try to pass event_id, fallback if announcer not migrated)
+        # announce killstreaks
         if killstreaks[ks_key_killer]["count"] >= 2:
             try:
                 await _call_announcer(send_killstreak_announcement, bot, killer, killstreaks[ks_key_killer]["count"], event_id=event_id)
-            except Exception:
-                # fallback: try without event_id
-                try:
-                    await send_killstreak_announcement(bot, killer, killstreaks[ks_key_killer]["count"])
-                except Exception as e:
+            except Exception as e:
                     logging.exception(f"❌ Killstreak announcement failed: {e}")
 
             # play sound (announcer helper may accept event_id)
             try:
                 await _call_announcer(play_killstreak_sound, bot, killstreaks[ks_key_killer]["count"], message.guild, event_id=event_id)
-            except Exception:
-                try:
-                    await play_killstreak_sound(bot, killstreaks[ks_key_killer]["count"], message.guild)
-                except Exception as e:
+            except Exception as e:
                     logging.exception(f"❌ Killstreak sound failed: {e}")
 
         # clear victim's killstreak for this event (if any)
