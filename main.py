@@ -1,24 +1,20 @@
 # -*- coding: utf-8 -*-
-
 # main.py
 
 import os
 import sys
 import logging
 import re
-import ctypes
 import discord
 import discord.opus
-
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timedelta
 from discord.ext import commands
 
 from settings import *
 from db import *
 from commands import *
 from announcer import *
-
 
 # --- Logging ---
 
@@ -46,9 +42,9 @@ else:
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True  # 👈 required for bot identification of users!
+intents.members = True  # required for member info
 bot = commands.Bot(command_prefix=">", intents=intents)
-setup_commands(bot)  # 👈 registering the commands
+setup_commands(bot)  # register slash commands
 
 # --- Paths & Init ---
 
@@ -67,6 +63,7 @@ init_rank_roles_table()
 init_mmr_roles_table()
 
 clear_deathless_streaks()
+ensure_default_event() 
 
 # --- Token ---
 
@@ -80,13 +77,12 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     logging.error("❌ DISCORD_TOKEN is missing from .env")
     sys.exit("❌ Token missing.")
-    
-# --- Killstreaks ---
 
-killstreaks = {}
+# --- Killstreaks: store per-event to avoid mixing series across events ---
+
+# key: (event_id, character) -> {"count": int, "last_kill_time": datetime}
+killstreaks: dict = {}
 KILLSTREAK_TIMEOUT = int(get_setting("killstreak_timeout") or 15)
-
-# --- Events ---
 
 @bot.event
 async def on_ready():
@@ -96,77 +92,193 @@ async def on_ready():
     except Exception as e:
         logging.error(f"❌ Failed to sync commands: {e}")
 
+def _call_announcer(func, *args, event_id=None, **kwargs):
+    """
+    Helper: call announcer function trying two signatures:
+    1) func(..., event_id=event_id)
+    2) func(...)  (fallback for backward compatibility)
+    """
+    if event_id is None:
+        try:
+            return func(*args, **kwargs)
+        except TypeError:
+            return func(*args)
+    else:
+        try:
+            return func(*args, event_id=event_id, **kwargs)
+        except TypeError:
+            # announcer not yet migrated to accept event_id -> fallback
+            return func(*args, **kwargs)
 
 @bot.event
-async def on_message(message):
-    channel_id = get_tracking_channel_id()
-    if channel_id and message.channel.id == channel_id:
-        content = message.content.strip()
+async def on_message(message: discord.Message):
+    # Ignore bot messages
+    if message.author and message.author.bot:
+        return
 
-        # --- [1] Standard Kill Check ---
-        match = re.match(r"^(.+?) killed by (.+)$", content)
-        if match:
-            victim, killer = match.groups()
-            killer = killer.strip().lower()
-            victim = victim.strip().lower()
-            now = datetime.utcnow()
+    channel = message.channel
+    if not channel:
+        return
 
-            # --- Killstreak ---
-            if killer not in killstreaks:
-                killstreaks[killer] = {"count": 1, "last_kill_time": now}
+    # Determine event by channel (new helper in db.py)
+    try:
+        event_id = get_event_id_by_channel(channel.id)
+    except Exception as e:
+        logging.exception(f"❌ Failed to resolve event for channel {channel.id}: {e}")
+        event_id = None
+
+    # If channel isn't linked to any event — ignore message
+    if not event_id:
+        # optionally: debug log
+        logging.debug(f"Ignored message in unregistered channel {channel.id}")
+        return
+
+    content = message.content.strip()
+
+    # --- [1] Standard Kill Check ---
+    match = re.match(r"^(.+?) killed by (.+)$", content)
+    if match:
+        victim_raw, killer_raw = match.groups()
+        killer = killer_raw.strip().lower()
+        victim = victim_raw.strip().lower()
+        now = datetime.utcnow()
+
+        ks_key_killer = (event_id, killer)
+        ks_key_victim = (event_id, victim)
+
+        # --- Killstreak (per-event) ---
+        if ks_key_killer not in killstreaks:
+            killstreaks[ks_key_killer] = {"count": 1, "last_kill_time": now}
+        else:
+            delta = (now - killstreaks[ks_key_killer]["last_kill_time"]).total_seconds()
+            if delta <= KILLSTREAK_TIMEOUT:
+                killstreaks[ks_key_killer]["count"] += 1
             else:
-                delta = (now - killstreaks[killer]["last_kill_time"]).total_seconds()
-                if delta <= KILLSTREAK_TIMEOUT:
-                    killstreaks[killer]["count"] += 1
-                else:
-                    killstreaks[killer]["count"] = 1
-                killstreaks[killer]["last_kill_time"] = now
+                killstreaks[ks_key_killer]["count"] = 1
+            killstreaks[ks_key_killer]["last_kill_time"] = now
 
-            if killstreaks[killer]["count"] >= 2:
-                await send_killstreak_announcement(bot, killer, killstreaks[killer]["count"])
-                await play_killstreak_sound(bot, killstreaks[killer]["count"], message.guild)
-
-            if victim in killstreaks:
-                del killstreaks[victim]
-
-            add_frag(killer, victim)
-            
-            # 🔻 Announce streak break if victim had a deathless streak
-            if get_deathless_streak(victim) >= 3:
-                await announce_streak_break(bot, victim, message.guild)
-
-            # --- Deathless streak logic ---
-            new_count = update_deathless_streaks(killer, victim)
-            if new_count:
-                await send_deathless_announcement(bot, killer, new_count)
-                await play_deathless_sound(bot, new_count, message.guild)
-
-        # --- [2] Checking for a single death (for example, by nature or suicide) ---
-        
-        elif (match := re.match(r"^(.+?) is dead$", content)):
-            victim = match.group(1).strip().lower()
-            if victim:
-                logging.info(f"💀 '{victim}' died without a killer. Resetting deathless streak.")
+        # announce killstreaks (try to pass event_id, fallback if announcer not migrated)
+        if killstreaks[ks_key_killer]["count"] >= 2:
+            try:
+                await _call_announcer(send_killstreak_announcement, bot, killer, killstreaks[ks_key_killer]["count"], event_id=event_id)
+            except Exception:
+                # fallback: try without event_id
                 try:
-                    had_streak = reset_deathless_streak(victim)
+                    await send_killstreak_announcement(bot, killer, killstreaks[ks_key_killer]["count"])
                 except Exception as e:
-                    logging.exception(f"❌ Failed to reset deathless streak for '{victim}': {e}")
-                    had_streak = False
+                    logging.exception(f"❌ Killstreak announcement failed: {e}")
 
-                # 💥 If there was an active episode , we will announce its termination
-                if had_streak:
+            # play sound (announcer helper may accept event_id)
+            try:
+                await _call_announcer(play_killstreak_sound, bot, killstreaks[ks_key_killer]["count"], message.guild, event_id=event_id)
+            except Exception:
+                try:
+                    await play_killstreak_sound(bot, killstreaks[ks_key_killer]["count"], message.guild)
+                except Exception as e:
+                    logging.exception(f"❌ Killstreak sound failed: {e}")
+
+        # clear victim's killstreak for this event (if any)
+        if ks_key_victim in killstreaks:
+            del killstreaks[ks_key_victim]
+
+        # Add frag: pass channel id so add_frag can resolve event internally
+        try:
+            # prefer passing channel id (backward compatible: if add_frag signature changed to accept channel_id)
+            add_frag(killer, victim, channel_id=channel.id)
+        except TypeError:
+            # fallback: old signature (no channel_id) — still call it (less preferred)
+            try:
+                add_frag(killer, victim)
+            except Exception as e:
+                logging.exception(f"❌ add_frag failed (fallback): {e}")
+        except Exception as e:
+            logging.exception(f"❌ add_frag failed: {e}")
+
+        # 🔻 Announce streak break if the victim had a deathless streak (use DB helper)
+        try:
+            # get_deathless_streak may be event-aware; try passing event_id, fallback otherwise
+            had_deathless = False
+            try:
+                val = get_deathless_streak(victim, event_id=event_id)
+                had_deathless = (val >= 3)
+            except TypeError:
+                val = get_deathless_streak(victim)
+                had_deathless = (val >= 3)
+
+            if had_deathless:
+                try:
+                    await _call_announcer(announce_streak_break, bot, victim, message.guild, event_id=event_id)
+                except Exception:
+                    try:
+                        await announce_streak_break(bot, victim, message.guild)
+                    except Exception as e:
+                        logging.exception(f"❌ announce_streak_break failed: {e}")
+        except Exception:
+            # don't let announcer errors break processing
+            logging.exception("❌ Failed while handling deathless streak check/announce")
+
+        # --- Deathless streak logic: update DB counters (try to pass event_id)
+        try:
+            try:
+                new_count = update_deathless_streaks(killer, victim, event_id=event_id)
+            except TypeError:
+                new_count = update_deathless_streaks(killer, victim)
+            if new_count:
+                try:
+                    await _call_announcer(send_deathless_announcement, bot, killer, new_count, event_id=event_id)
+                except Exception:
+                    try:
+                        await send_deathless_announcement(bot, killer, new_count)
+                    except Exception as e:
+                        logging.exception(f"❌ send_deathless_announcement failed: {e}")
+
+                try:
+                    await _call_announcer(play_deathless_sound, bot, new_count, message.guild, event_id=event_id)
+                except Exception:
+                    try:
+                        await play_deathless_sound(bot, new_count, message.guild)
+                    except Exception as e:
+                        logging.exception(f"❌ play_deathless_sound failed: {e}")
+
+        except Exception:
+            logging.exception("❌ Failed during deathless streak update")
+
+        return  # processed this message
+
+    # --- [2] Single death (no killer) ---
+    elif (match := re.match(r"^(.+?) is dead$", content)):
+        victim = match.group(1).strip().lower()
+        if victim:
+            logging.info(f"💀 '{victim}' died without a killer. Resetting deathless streak.")
+            try:
+                try:
+                    had_streak = reset_deathless_streak(victim, event_id=event_id)
+                except TypeError:
+                    had_streak = reset_deathless_streak(victim)
+            except Exception as e:
+                logging.exception(f"❌ Failed to reset deathless streak for '{victim}': {e}")
+                had_streak = False
+
+            if had_streak:
+                try:
+                    await _call_announcer(announce_streak_break, bot, victim, message.guild, event_id=event_id)
+                except Exception:
                     try:
                         await announce_streak_break(bot, victim, message.guild)
                     except Exception as e:
                         logging.exception(f"❌ Failed to announce streak break for '{victim}': {e}")
 
-                if victim in killstreaks:
-                    del killstreaks[victim]
-            else:
-                logging.warning(f"⚠️ Death message matched, but victim name is empty: {content}")
+            # clear killstreak for this victim in this event
+            ks_key_victim = (event_id, victim)
+            if ks_key_victim in killstreaks:
+                del killstreaks[ks_key_victim]
         else:
-            logging.warning(f"⚠️  Message does not match known kill format: {content}")
+            logging.warning(f"⚠️ Death message matched, but victim name is empty: {content}")
+        return
 
+    # not a known pattern
+    logging.debug(f"⚠️  Message does not match known kill format: {content}")
 
 # --- Run bot ---
+
 bot.run(TOKEN)

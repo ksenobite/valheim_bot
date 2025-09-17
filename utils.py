@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 # utils.py
 
 import discord
@@ -13,7 +12,6 @@ from datetime import datetime, timedelta
 
 from db import *
 from settings import get_db_file_path
-
 
 class PaginatedStatsView(discord.ui.View):
     
@@ -38,7 +36,6 @@ class PaginatedStatsView(discord.ui.View):
             self.index += 1
             await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
 
-
 def get_winrate_emoji(winrate: float) -> str:
     """Returns emoji based on win rate."""
     if winrate > 60:
@@ -48,13 +45,11 @@ def get_winrate_emoji(winrate: float) -> str:
     else:
         return "🔴"
 
-
 def safe_display_name(member: discord.Member) -> str:
     """
     Returns the readable name of the participant.
     """
     return member.nick or member.display_name or member.name
-
 
 async def require_admin(interaction: discord.Interaction) -> bool:
     user = cast(Member, interaction.user)
@@ -70,22 +65,22 @@ async def check_positive(interaction: discord.Interaction, **kwargs):
             return False
     return True
 
-
-async def resolve_display_data(character_name: str, guild: discord.Guild) -> dict:
+async def resolve_display_data(character_name: str, guild: Optional[discord.Guild]) -> dict:
     """
-    Returns display data for the character:
-    - If character is linked to a Discord user and found in guild:
-        -> return their name, avatar, color and PvP role.
-    - Else: show character name only.
+    Returns display data for the character.
+    If guild is None, returns fallback data (no member lookup).
     """
     discord_id = get_discord_id_by_character(character_name)
-    if not discord_id:
+    if not discord_id or guild is None:
+        # no linked discord id OR no guild provided -> fallback
         return {
             "display_name": character_name,
             "avatar_url": None,
             "role": None,
             "color": discord.Color.default()
         }
+
+    # guild is provided and we have a discord_id
     member = guild.get_member(discord_id)
     if not member:
         try:
@@ -98,18 +93,34 @@ async def resolve_display_data(character_name: str, guild: discord.Guild) -> dic
                 "role": None,
                 "color": discord.Color.default()
             }
+        except Exception as e:
+            logging.exception(f"Failed to fetch member {discord_id}: {e}")
+            return {
+                "display_name": character_name,
+                "avatar_url": None,
+                "role": None,
+                "color": discord.Color.default()
+            }
+
     # Use role color from PvP roles configured in DB
     configured_roles = [name for _, name in get_all_rank_roles()]
     role = next((r for r in member.roles if r.name in configured_roles), None)
+
     return {
         "display_name": safe_display_name(member),
-        "avatar_url": member.display_avatar.url,
+        "avatar_url": member.display_avatar.url if hasattr(member, "display_avatar") else None,
         "role": role.name if role else None,
         "color": role.color if role else discord.Color.default()
     }
 
-
-async def generate_stats_embeds(interaction: discord.Interaction, characters: list[str], days: int, avatar_url=None, target_user_id: Optional[int] = None):
+async def generate_stats_embeds(
+    interaction: discord.Interaction,
+    characters: list[str],
+    days: int,
+    event_id: Optional[int] = None,
+    avatar_url=None,
+    target_user_id: Optional[int] = None
+):
     if not interaction.guild:
         await interaction.response.send_message("❌ This command must be used in a server (guild).", ephemeral=True)
         return
@@ -122,18 +133,23 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
         defeats = {}
         characters = [name.lower() for name in characters]
         for character in characters:
+            # победы
             c.execute("""
                 SELECT victim, COUNT(*) FROM frags
                 WHERE killer = ? AND timestamp >= ?
+                AND (? IS NULL OR event_id = ?)
                 GROUP BY victim
-            """, (character, since))
+            """, (character, since, event_id, event_id))
             for victim, count in c.fetchall():
                 victories[victim] = victories.get(victim, 0) + count
+
+            # поражения
             c.execute("""
                 SELECT killer, COUNT(*) FROM frags
                 WHERE victim = ? AND timestamp >= ?
+                AND (? IS NULL OR event_id = ?)
                 GROUP BY killer
-            """, (character, since))
+            """, (character, since, event_id, event_id))
             for killer, count in c.fetchall():
                 defeats[killer] = defeats.get(killer, 0) + count
 
@@ -177,7 +193,12 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
 
         chars = get_user_characters(target_user_id) if target_user_id else characters
 
-        mmrs = [get_glicko_rating(c)[0] for c in chars if get_glicko_rating(c)]
+        mmrs = []
+        for c in chars:
+            glicko_data = get_glicko_rating_extended(c, event_id)
+            if glicko_data:
+                mmrs.append(glicko_data[0])
+
         avg_mmr = round(sum(mmrs) / len(mmrs)) if mmrs else None
         mmr_line = f"`{avg_mmr}`\n" if avg_mmr is not None else ""
 
@@ -209,7 +230,6 @@ async def generate_stats_embeds(interaction: discord.Interaction, characters: li
         embeds.append(embed)
 
     return embeds
-
 
 async def generate_topmmr_embeds(interaction: Interaction, leaderboard_data: list, public: bool = False, details: bool = False):
     """

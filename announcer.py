@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 # announcer.py
 
 import os
@@ -9,16 +8,17 @@ import asyncio
 import wave
 
 from collections import defaultdict, deque
+from typing import Optional
 from discord import VoiceClient
 
 from db import get_announce_channel_id, get_announce_style
 from utils import resolve_display_data 
 
-
 SOUNDS_DIR = None
 audio_queues = defaultdict(deque)  # guild.id -> deque of file paths
 
-# 📦 Simple WAV audio source
+# --- 📦 Simple WAV audio source ---
+
 class SimpleAudioSource(discord.AudioSource):
     def __init__(self, file_path):
         self.wave = wave.open(file_path, 'rb')
@@ -33,8 +33,8 @@ class SimpleAudioSource(discord.AudioSource):
     def cleanup(self):
         self.wave.close()
 
+# --- 🎶 Frags Styles ---
 
-# 🎶 Frags Styles
 KILLSTREAK_STYLES = {
     "classic": {
         2: {"title": "🔥 DOUBLE KILL 🔥", "emojis": "🔥"},
@@ -55,7 +55,6 @@ KILLSTREAK_STYLES = {
         5: {"title": "⚡ 5 FRAGS", "emojis": "⚡⚡⚡⚡"},
     }
 }
-
 
 DEATHLESS_STYLES = {
     "classic": {
@@ -78,7 +77,6 @@ DEATHLESS_STYLES = {
     }
 }
 
-
 def set_sounds_path(path):
     global SOUNDS_DIR
     SOUNDS_DIR = path
@@ -86,7 +84,6 @@ def set_sounds_path(path):
         logging.warning(f"❗ Sounds directory does not exist: {SOUNDS_DIR}")
     else:
         logging.info(f"🎵 Using sounds from: {SOUNDS_DIR}")
-
 
 async def send_killstreak_announcement(bot, killer: str, count: int):
     channel_id = get_announce_channel_id()
@@ -137,7 +134,6 @@ async def send_killstreak_announcement(bot, killer: str, count: int):
     except Exception as e:
         logging.exception(f"❌ Failed to send killstreak embed announcement: {e}")
 
-
 async def send_deathless_announcement(bot, killer: str, count: int):
     channel_id = get_announce_channel_id()
     if not channel_id:
@@ -187,11 +183,15 @@ async def send_deathless_announcement(bot, killer: str, count: int):
     except Exception as e:
         logging.exception(f"❌ Failed to send embed deathless streak announcement: {e}")
 
-
-async def play_killstreak_sound(bot, count: int, guild: discord.Guild):
+async def play_killstreak_sound(bot, count: int, guild: Optional[discord.Guild] = None, event_id: Optional[int] = None):
     if not SOUNDS_DIR:
         logging.error("❗ SOUNDS_DIR is not set.")
         return
+
+    if guild is None:
+        logging.warning("🔇 play_killstreak_sound: guild is None — cannot play sound.")
+        return
+
     sound_map = {
         2: os.path.join(SOUNDS_DIR, "doublekill.wav"),
         3: os.path.join(SOUNDS_DIR, "triplekill.wav"),
@@ -202,24 +202,33 @@ async def play_killstreak_sound(bot, count: int, guild: discord.Guild):
     if not sound_file or not os.path.isfile(sound_file):
         logging.warning(f"⚠️ Sound file not found: {sound_file}")
         return
+
     voice_client = discord.utils.get(bot.voice_clients, guild=guild)
     if not voice_client:
         logging.warning("🔇 Bot is not connected to a voice channel.")
         return
-    if voice_client.is_playing():
-        voice_client.stop()
-        logging.warning("⚠️ Stopped previous sound playback.")
+    # voice_client may be VoiceClient/VoiceProtocol — keep existing usage
+    try:
+        if voice_client.is_playing():
+            voice_client.stop()
+            logging.warning("⚠️ Stopped previous sound playback.")
+    except Exception:
+        # some voice backends may not expose is_playing; ignore
+        pass
+
     try:
         enqueue_sound(guild, sound_file)
-        
         logging.info(f"🔊 Playing sound: {sound_file}")
     except Exception as e:
         logging.exception("💥 Failed to play killstreak sound")
 
-
-async def play_deathless_sound(bot, count: int, guild: discord.Guild):
+async def play_deathless_sound(bot, count: int, guild: Optional[discord.Guild] = None, event_id: Optional[int] = None):
     if not SOUNDS_DIR:
         logging.error("❗ SOUNDS_DIR is not set.")
+        return
+
+    if guild is None:
+        logging.warning("🔇 play_deathless_sound: guild is None — cannot play sound.")
         return
 
     deathless_sound_map = {
@@ -242,17 +251,18 @@ async def play_deathless_sound(bot, count: int, guild: discord.Guild):
         logging.warning("🔇 Bot is not connected to a voice channel.")
         return
 
-    if voice_client.is_playing():
-        voice_client.stop()
-        logging.warning("⚠️ Stopped previous sound playback.")
+    try:
+        if voice_client.is_playing():
+            voice_client.stop()
+            logging.warning("⚠️ Stopped previous sound playback.")
+    except Exception:
+        pass
 
     try:
         enqueue_sound(guild, sound_file)
-        
         logging.info(f"🔊 Playing deathless sound: {sound_file}")
     except Exception as e:
         logging.exception("💥 Failed to play deathless streak sound")
-
 
 async def start_heartbeat_loop(bot, guild):
     if not SOUNDS_DIR:
@@ -274,7 +284,6 @@ async def start_heartbeat_loop(bot, guild):
                 logging.warning(f"⚠️ Heartbeat failed: {e}")
                 await asyncio.sleep(10)
                 
-
 async def audio_queue_worker(bot: discord.Client, guild: discord.Guild):
     while True:
         queue = audio_queues[guild.id]
@@ -293,27 +302,46 @@ async def audio_queue_worker(bot: discord.Client, guild: discord.Guild):
                 logging.exception(f"💥 Failed to play {filepath}")
         await asyncio.sleep(1)
 
-
 def enqueue_sound(guild: discord.Guild, file_path: str):
     if os.path.isfile(file_path):
         audio_queues[guild.id].append(file_path)
         logging.info(f"🎶 Queued sound: {file_path}")
 
+async def announce_streak_break(bot: discord.Client, character: str, guild: Optional[discord.Guild] = None, event_id: Optional[int] = None):
+    """📣 Announcement of the interruption of the series of victories."""
+    # Try to resolve announce channel for event if function supports it
+    channel_id = None
+    try:
+        # If db has get_announce_channel_id(event_id) signature — use it
+        channel_id = get_announce_channel_id(event_id)  # type: ignore
+    except TypeError:
+        # fallback to old signature
+        try:
+            channel_id = get_announce_channel_id()
+        except Exception:
+            channel_id = None
+    except Exception:
+        # any other error, try fallback
+        try:
+            channel_id = get_announce_channel_id()
+        except Exception:
+            channel_id = None
 
-async def announce_streak_break(bot: discord.Client, character: str, guild: discord.Guild):
-    """📣 Announcement of the interruption of the series of victories"""
-    channel_id = get_announce_channel_id()
     if not channel_id:
-        logging.warning("❗ Announce channel ID not set.")
+        logging.warning("❗ Announce channel ID not set for streak break.")
         return
-    
+
     channel = bot.get_channel(channel_id)
-    if not isinstance(channel, discord.TextChannel):
-        logging.warning(f"❗ Announce channel is not a TextChannel (ID: {channel_id})")
+    if not channel or not isinstance(channel, discord.TextChannel):
+        logging.warning(f"❗ Announce channel not found or not a TextChannel (ID: {channel_id}).")
         return
+
+    # prefer guild from channel if none provided
+    resolved_guild = guild or getattr(channel, "guild", None)
 
     try:
-        display = await resolve_display_data(character, guild)
+        # resolve_display_data now accepts Optional[Guild]
+        display = await resolve_display_data(character, resolved_guild)
         name = display.get("display_name", character)
         avatar_url = display.get("avatar_url")
         color = display.get("color", discord.Color.red())
@@ -337,12 +365,12 @@ async def announce_streak_break(bot: discord.Client, character: str, guild: disc
     except Exception as e:
         logging.exception(f"❌ Failed to send streak break embed for {name}: {e}")
 
-    # 🎵 Sound
+    # 🎵 Sound: try to enqueue in the channel's guild
     try:
-        if SOUNDS_DIR:
+        if SOUNDS_DIR and isinstance(SOUNDS_DIR, str):
             sound_file = os.path.join(SOUNDS_DIR, "obezhiren.wav")
             if os.path.isfile(sound_file):
-                enqueue_sound(guild, sound_file)
+                enqueue_sound(channel.guild, sound_file)
                 logging.info(f"🔊 Queued sound for streak break: {sound_file}")
             else:
                 logging.warning(f"⚠️ Streak break sound not found: {sound_file}")

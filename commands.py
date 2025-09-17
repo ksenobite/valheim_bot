@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 # commands.py
 
 import os
@@ -24,7 +23,6 @@ from roles import *
 from announcer import *
 from utils import *
 from glicko2 import Player
-
 
 def setup_commands(bot: commands.Bot):
     
@@ -55,7 +53,6 @@ def setup_commands(bot: commands.Bot):
             else:
                 await interaction.response.send_message("⚠️ Tracking channel is not set.", ephemeral=True)
 
-
     @bot.tree.command(name="announce", description="Show or set the announce channel")
     @app_commands.describe(channel="Channel")
     async def announce(interaction: Interaction, channel: Optional[discord.TextChannel] = None):
@@ -81,7 +78,6 @@ def setup_commands(bot: commands.Bot):
             else:
                 await interaction.response.send_message("⚠️ Announce channel is not set.", ephemeral=True)
 
-
     @bot.tree.command(name="killstreaktimeout", description="Show or set the killstreak timeout (in seconds)")
     @app_commands.describe(seconds="New timeout value in seconds")
     async def killstreaktimeout(interaction: Interaction, seconds: Optional[int] = None):
@@ -103,7 +99,6 @@ def setup_commands(bot: commands.Bot):
             else:
                 await interaction.response.send_message("❗ Killstreak timeout is not set. Default: 15 seconds.", ephemeral=True)
 
-
     @bot.tree.command(name="link", description="Link a game character to a Discord user")
     @app_commands.describe(character="Character's name", user="Discord User")
     async def link(interaction: Interaction, character: str, user: discord.Member):
@@ -112,7 +107,6 @@ def setup_commands(bot: commands.Bot):
         character = character.lower()
         set_character_owner(character, user.id)
         await interaction.response.send_message(f"✅ The character **{character}** is linked to {user.mention}.", ephemeral=True)
-
 
     @bot.tree.command(name="unlink", description="Remove the connection between the character and the user")
     @app_commands.describe(character="Character's name")
@@ -126,7 +120,6 @@ def setup_commands(bot: commands.Bot):
         else:
             await interaction.response.send_message(f"❌ The character **{character}** was not attached.", ephemeral=True)
 
-
     @bot.tree.command(name="roleset", description="Set a rank role for a win threshold")
     @describe(wins="Minimum number of wins for the role", role="Discord role to assign")
     async def roleet(interaction: Interaction, wins: int, role: discord.Role):
@@ -137,7 +130,6 @@ def setup_commands(bot: commands.Bot):
             return
         set_rank_role(wins, role.name)
         await interaction.response.send_message(f"✅ Rank **{role.name}** set for `{wins}`+ wins.", ephemeral=True)
-
 
     @bot.tree.command(name="roleupdate", description="Force role update for all members")
     async def roleupdate(interaction: discord.Interaction):
@@ -150,14 +142,12 @@ def setup_commands(bot: commands.Bot):
         await update_roles_for_all_members(interaction.client)
         await interaction.followup.send("✅ Roles updated.")
 
-
     @bot.tree.command(name="roleclear", description="Clear all configured rank roles")
     async def rankclear(interaction: Interaction):
         if not await require_admin(interaction):
             return
         clear_rank_roles()
         await interaction.response.send_message("🗑️ All rank roles have been cleared.", ephemeral=True)
-
 
     @bot.tree.command(name="points", description="Admin: manual control of players' points")
     @app_commands.describe(
@@ -201,7 +191,6 @@ def setup_commands(bot: commands.Bot):
         embed.set_footer(text=f"Changed by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
 
         await interaction.followup.send(embed=embed, ephemeral=True)
-        
 
     @bot.tree.command(name="pointlog", description="Show manual adjustment history")
     @app_commands.describe(target="Character name or @user")
@@ -258,8 +247,7 @@ def setup_commands(bot: commands.Bot):
 
         embed.set_footer(text="Most recent 20 changes")
         await interaction.followup.send(embed=embed, ephemeral=True)
-    
-    
+
     @bot.tree.command(name="voice", description="Join or leave a voice channel")
     @app_commands.describe(leave="Set True to leave the voice channel")
     async def voice(interaction: discord.Interaction, leave: bool = False):
@@ -302,7 +290,6 @@ def setup_commands(bot: commands.Bot):
         asyncio.create_task(audio_queue_worker(bot, interaction.guild))
         asyncio.create_task(start_heartbeat_loop(bot, interaction.guild))
 
-
     @bot.tree.command(name="style", description="Show or set the killstreak announce style")
     @app_commands.describe(style="Style name (classic, epic, tournament)")
     async def style(interaction: Interaction, style: Optional[str] = None):
@@ -322,7 +309,6 @@ def setup_commands(bot: commands.Bot):
         else:
             current_style = get_announce_style()
             await interaction.response.send_message(f"✅ Current announce style is **{current_style}**.", ephemeral=True)
-
 
     @bot.tree.command(name="reset", description="Reset the database or restore from backup")
     @app_commands.describe(backup="Name of the backup file to restore (optional)")
@@ -367,32 +353,35 @@ def setup_commands(bot: commands.Bot):
 # --- User Commands ---
 
     @bot.tree.command(name="top", description="Top players by total points (frags + adjustments)")
-    @app_commands.describe(count="Number of top players", days="Days", public="Publish?")
-    async def top(interaction: Interaction, count: int = 10, days: int = 1, public: bool = False):
+    @app_commands.describe(count="Number of top players", days="Days", event="Event name", public="Publish?")
+    async def top(interaction: Interaction, count: int = 10, days: int = 1, event: Optional[str] = None, public: bool = False):
         if not await check_positive(interaction, count=count, days=days):
             return
 
-        # 🛡️ Admin check for public results
         if public and (not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator):
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
             return
 
-        # 🏰 Ensure we're in a guild
         if not interaction.guild:
             await interaction.response.send_message("❌ This command must be used in a server.", ephemeral=True)
             return
 
         await interaction.response.defer(thinking=True, ephemeral=not public)
 
-        # 🗂️ Collect all killers in timeframe
+        # 🎯 Определяем event_id
+        event_id = get_event_id_by_name(event) if event else get_default_event_id()
+        if not event_id:
+            await interaction.followup.send(f"❌ Event `{event}` not found.", ephemeral=True)
+            return
+
         since = datetime.utcnow() - timedelta(days=days)
         with sqlite3.connect(get_db_path()) as conn:
             c = conn.cursor()
             c.execute("""
                 SELECT killer, COUNT(*) as count FROM frags
-                WHERE timestamp >= ?
+                WHERE timestamp >= ? AND event_id = ?
                 GROUP BY killer
-            """, (since,))
+            """, (since, event_id))
             raw_stats = c.fetchall()
 
         # 📊 Aggregate frags and manual points
@@ -420,11 +409,11 @@ def setup_commands(bot: commands.Bot):
             return
 
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-        author_text = f"🏆 Top-{count} in {days} day(s)"
+        author_text = f"🏆 Top-{count} in {days} day(s) ({event or 'default'})"
         page_size = 10
         embeds = []
 
-        # 🖼️ Top user info for thumbnail
+        # 🖼️ Top user info
         top_key = sorted_stats[0][0]
         if isinstance(top_key, int):
             member = interaction.guild.get_member(top_key)
@@ -438,9 +427,7 @@ def setup_commands(bot: commands.Bot):
 
         # 📄 Build paginated leaderboard
         for start in range(0, len(sorted_stats), page_size):
-            embed = discord.Embed(
-                color=top_display.get("color", discord.Color.dark_grey())
-            )
+            embed = discord.Embed(color=top_display.get("color", discord.Color.dark_grey()))
             embed.set_author(name=author_text)
             if top_display.get("avatar_url"):
                 embed.set_thumbnail(url=top_display["avatar_url"])
@@ -452,10 +439,10 @@ def setup_commands(bot: commands.Bot):
                         "display_name": member.display_name if member else f"User {key}",
                         "avatar_url": member.display_avatar.url if member else None
                     }
-                    mmr = get_user_glicko_mmr(key)
+                    mmr = get_user_glicko_mmr(key, event_id)
                 else:
                     display_data = await resolve_display_data(key, interaction.guild)
-                    rating_data = get_glicko_rating(key)
+                    rating_data = get_glicko_rating_extended(key, event_id)
                     mmr = rating_data[0] if rating_data else "—"
 
                 medal = medals.get(i, "")
@@ -474,18 +461,15 @@ def setup_commands(bot: commands.Bot):
 
             embeds.append(embed)
 
-        # 📬 Send result
         if len(embeds) == 1:
             await interaction.followup.send(embed=embeds[0], ephemeral=not public)
         else:
             view = PaginatedStatsView(embeds, ephemeral=not public)
             await view.send_initial(interaction)
 
-
     @bot.tree.command(name="mystats", description="Show your stats (all linked characters)")
-    @app_commands.describe(days="Days", public="Publish?")
-    async def mystats(interaction: Interaction, days: int = 1, public: bool = False):
-        # 🛡️ Only allow public usage by admins
+    @app_commands.describe(days="Days", event="Event name", public="Publish?")
+    async def mystats(interaction: Interaction, days: int = 1, event: Optional[str] = None, public: bool = False):
         if public and (not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator):
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
             return
@@ -501,11 +485,17 @@ def setup_commands(bot: commands.Bot):
 
         await interaction.response.defer(thinking=True, ephemeral=not public)
 
+        event_id = get_event_id_by_name(event) if event else get_default_event_id()
+        if not event_id:
+            await interaction.followup.send(f"❌ Event `{event}` not found.", ephemeral=True)
+            return
+
         avatar_url = interaction.user.display_avatar.url if hasattr(interaction.user, "display_avatar") else None
         embeds = await generate_stats_embeds(
             interaction,
             characters,
             days,
+            event_id=event_id,
             avatar_url=avatar_url,
             target_user_id=user_id
         )
@@ -520,11 +510,15 @@ def setup_commands(bot: commands.Bot):
             view = PaginatedStatsView(embeds, ephemeral=not public)
             await view.send_initial(interaction)
 
-
     @bot.tree.command(name="stats", description="Show player stats")
-    @app_commands.describe(player="Character or @user", days="Days", public="Publish?")
-    async def stats(interaction: Interaction, player: str, days: int = 1, public: bool = False):
-        # 🛡️ Only allow public usage by admins
+    @app_commands.describe(
+        player="Character or @user",
+        days="Days",
+        event="Event name",
+        public="Publish?"
+    )
+    async def stats(interaction: Interaction, player: str, days: int = 1, event: Optional[str] = None, public: bool = False):
+        # 🛡️ Admin check
         if public and (not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator):
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
             return
@@ -533,6 +527,11 @@ def setup_commands(bot: commands.Bot):
             return
 
         await interaction.response.defer(thinking=True, ephemeral=not public)
+
+        event_id = get_event_id_by_name(event) if event else get_default_event_id()
+        if not event_id:
+            await interaction.followup.send(f"❌ Event `{event}` not found.", ephemeral=True)
+            return
 
         avatar_url = None
         characters = []
@@ -556,6 +555,7 @@ def setup_commands(bot: commands.Bot):
             interaction,
             characters,
             days,
+            event_id=event_id,
             avatar_url=avatar_url,
             target_user_id=user_id
         )
@@ -569,7 +569,6 @@ def setup_commands(bot: commands.Bot):
         else:
             view = PaginatedStatsView(embeds, ephemeral=not public)
             await view.send_initial(interaction)
-
 
     @bot.tree.command(name="whois", description="Show who owns the character or what characters belong to a user")
     @app_commands.describe(character="Character or @user")
@@ -615,7 +614,6 @@ def setup_commands(bot: commands.Bot):
                     ephemeral=True
                 )
 
-    
     @bot.tree.command(name="roles", description="Show the current rank role configuration")
     @app_commands.describe(public="Publish result to channel?")
     async def roles(interaction: Interaction, public: bool = False):
@@ -720,7 +718,6 @@ def setup_commands(bot: commands.Bot):
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-
     @bot.tree.command(name="mmrlog", description="Show Glicko-2 rating adjustment history for a character or user")
     @app_commands.describe(target="Character name or @user")
     async def mmrlog(interaction: Interaction, target: str):
@@ -774,7 +771,6 @@ def setup_commands(bot: commands.Bot):
         embed.set_footer(text="Most recent 20 changes")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
- 
     @bot.tree.command(name="mmrroleset", description="Set a Glicko-2 role for a threshold")
     @app_commands.describe(threshold="Minimum Glicko rating", role="Discord role")
     async def mmrroleset(interaction: Interaction, threshold: int, role: discord.Role):
@@ -785,7 +781,6 @@ def setup_commands(bot: commands.Bot):
             return
         set_mmr_role(threshold, role.name)
         await interaction.response.send_message(f"✅ Role **{role.name}** set for `{threshold}+` Glicko rating.", ephemeral=True)
-
 
     @bot.tree.command(name="mmrroles", description="Show current Glicko-2 role configuration")
     async def mmrroles(interaction: Interaction):
@@ -804,7 +799,6 @@ def setup_commands(bot: commands.Bot):
             embed.add_field(name=f"{role_name}", value=f"Rating: `{threshold}+`", inline=True)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-
     @bot.tree.command(name="mmrroleclear", description="Clear all Glicko-2 role settings")
     async def mmrroleclear(interaction: Interaction):
         if not await require_admin(interaction):
@@ -812,10 +806,10 @@ def setup_commands(bot: commands.Bot):
         clear_mmr_roles()
         await interaction.response.send_message("🧹 All Glicko role settings have been cleared.", ephemeral=True)
 
-
     @bot.tree.command(name="mmrsync", description="🔁 Rebuild all Glicko-2 MMR from frags table")
-    async def mmrsync(interaction: discord.Interaction):
-        
+    @app_commands.describe(event="Optional event name to rebuild (otherwise rebuild all events)")
+    async def mmrsync(interaction: Interaction, event: Optional[str] = None):
+
         if not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
             return
@@ -823,76 +817,105 @@ def setup_commands(bot: commands.Bot):
         await interaction.response.defer(thinking=True, ephemeral=True)
 
         try:
-            # 🧠 Clearing all current glicko_ratings
-            with sqlite3.connect(get_db_path()) as conn:
-                conn.execute("DELETE FROM glicko_ratings")
-                conn.commit()
+            # 🗂️ Defining the list of events to process
+            if event:
+                ev = get_event_by_name(event)
+                if not ev:
+                    await interaction.followup.send(f"❌ Event '{event}' not found.", ephemeral=True)
+                    return
+                events_to_process = [ev]  # [(id, name, ...)]
+            else:
+                events_to_process = list_events()  # [(id, name, ...)]
 
-            # 🗂️ Reading all the frags
-            with sqlite3.connect(get_db_path()) as conn:
-                c = conn.cursor()
-                c.execute("SELECT killer, victim, timestamp FROM frags ORDER BY timestamp ASC")
-                rows = c.fetchall()
-
-            if not rows:
-                await interaction.followup.send("❌ No frags found.")
+            if not events_to_process:
+                await interaction.followup.send("❌ No events found.", ephemeral=True)
                 return
 
-            # 🎯 Grouping the fights by day
-            battles_by_day = defaultdict(list)
-            all_dates = []
+            for ev in events_to_process:
+                event_id, event_name, *_ = ev
+                logging.info(f"🔄 Rebuilding MMR for event '{event_name}' (id={event_id})")
 
-            for killer, victim, ts in rows:
-                day = datetime.fromisoformat(ts).date()
-                battles_by_day[day].append((killer.lower(), victim.lower()))
-                all_dates.append(day)
+                # 🧹 Clearing old data only for this event
+                with sqlite3.connect(get_db_path()) as conn:
+                    conn.execute("DELETE FROM glicko_ratings WHERE event_id = ?", (event_id,))
+                    conn.commit()
 
-            start_date = min(all_dates)
-            end_date = max(all_dates)
-            all_players = {}
+                # 📖 We read all the frags on the event
+                with sqlite3.connect(get_db_path()) as conn:
+                    c = conn.cursor()
+                    c.execute("""
+                        SELECT killer, victim, timestamp 
+                        FROM frags 
+                        WHERE event_id = ? 
+                        ORDER BY timestamp ASC
+                    """, (event_id,))
+                    rows = c.fetchall()
 
-            # 🚀 Starting the recalculation
-            current_date = start_date
-            while current_date <= end_date:
-                fights = battles_by_day.get(current_date, [])
+                if not rows:
+                    logging.info(f"ℹ️ No frags found for event '{event_name}'")
+                    continue
 
-                participated_today = set()
+                # 🎯 Grouping the fights by day
+                battles_by_day = defaultdict(list)
+                all_dates = []
 
-                for killer, victim in fights:
-                    if killer not in all_players:
-                        all_players[killer] = Player()
-                    if victim not in all_players:
-                        all_players[victim] = Player()
+                for killer, victim, ts in rows:
+                    day = datetime.fromisoformat(ts).date()
+                    battles_by_day[day].append((killer.lower(), victim.lower()))
+                    all_dates.append(day)
 
-                    p1 = all_players[killer]
-                    p2 = all_players[victim]
+                start_date = min(all_dates)
+                end_date = max(all_dates)
+                all_players = {}
 
-                    p1.update_player([p2.getRating()], [p2.getRd()], [1])
-                    p2.update_player([p1.getRating()], [p1.getRd()], [0])
+                # 🚀 Recalculating day by day
+                current_date = start_date
+                while current_date <= end_date:
+                    fights = battles_by_day.get(current_date, [])
 
-                    participated_today.update([killer, victim])
+                    participated_today = set()
 
-                # 📉 Decay for players who did not participate in the battles
-                for name, player in all_players.items():
-                    if name not in participated_today:
-                        player.pre_rating_period()
+                    for killer, victim in fights:
+                        if killer not in all_players:
+                            all_players[killer] = Player()
+                        if victim not in all_players:
+                            all_players[victim] = Player()
 
-                current_date += timedelta(days=1)
-                    
-            # ✅ Saving the results
-            with sqlite3.connect(get_db_path()) as conn:
-                for name, player in all_players.items():
-                    # get the latest frag timestamp for this character (ISO string), if any
-                    last_act = get_last_active_iso(name)
-                    set_glicko_rating(name, player.getRating(), player.getRd(), player._vol, last_activity=last_act)
+                        p1 = all_players[killer]
+                        p2 = all_players[victim]
+
+                        p1.update_player([p2.getRating()], [p2.getRd()], [1])
+                        p2.update_player([p1.getRating()], [p1.getRd()], [0])
+
+                        participated_today.update([killer, victim])
+
+                    # 📉 decay for those who didn't play that day
+                    for name, player in all_players.items():
+                        if name not in participated_today:
+                            player.pre_rating_period()
+
+                    current_date += timedelta(days=1)
+
+                # ✅ Saving the results
+                with sqlite3.connect(get_db_path()) as conn:
+                    for name, player in all_players.items():
+                        last_act = get_last_active_iso(name, event_id=event_id)
+                        set_glicko_rating(
+                            name,
+                            player.getRating(),
+                            player.getRd(),
+                            player._vol,
+                            event_id=event_id,
+                            last_activity=last_act,
+                        )
+
+                logging.info(f"✅ Glicko-2 sync finished for event '{event_name}'")
 
             await interaction.followup.send("✅ Glicko-2 MMR sync complete!", ephemeral=True)
-            logging.info("✅ Glicko-2 MMR synced successfully.")
 
         except Exception as e:
             logging.exception("❌ Failed to run Glicko MMR sync")
             await interaction.followup.send("❌ Failed to run MMR sync.", ephemeral=True)
-
 
     @bot.tree.command(name="mmrclear", description="Admin: Reset and reinitialize all Glicko-2 ratings")
     async def mmrclear(interaction: discord.Interaction):
@@ -943,11 +966,11 @@ def setup_commands(bot: commands.Bot):
             logging.exception("❌ Failed to reset and reinitialize Glicko-2 ratings")
             await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
-
     @bot.tree.command(name="topmmr", description="Top players by Glicko-2 rating")
     @app_commands.describe(
         count="Number of top players",
         days="Days to consider",
+        event="Event name",
         public="Publish to channel (admins only)?",
         details="Show detailed statistics?"
     )
@@ -955,10 +978,11 @@ def setup_commands(bot: commands.Bot):
         interaction: Interaction,
         count: int = 10,
         days: int = 30,
+        event: Optional[str] = None,
         public: bool = False,
         details: bool = False
     ):
-        # 📌 Checking access rights
+        # 🛡️ Access check
         if public and not (isinstance(interaction.user, discord.Member) and interaction.user.guild_permissions.administrator):
             await interaction.response.send_message("⚠️ Admin only.", ephemeral=True)
             return
@@ -972,11 +996,17 @@ def setup_commands(bot: commands.Bot):
             await interaction.followup.send("❌ This command must be used in a server (guild).", ephemeral=True)
             return
 
+        # 🎯 Resolve event_id
+        event_id = get_event_id_by_name(event) if event else get_default_event_id()
+        if not event_id:
+            await interaction.followup.send(f"❌ Event `{event}` not found.", ephemeral=True)
+            return
+
         since = datetime.utcnow() - timedelta(days=days)
         seen: set = set()
         leaderboard_data = []
 
-        for key in get_all_players():
+        for key in get_all_players(event_id):
             if key in seen:
                 continue
             seen.add(key)
@@ -987,20 +1017,20 @@ def setup_commands(bot: commands.Bot):
             recent_days = []
 
             for char in characters:
-                wins, losses, fights = get_fight_stats(char, since)
+                wins, losses, fights = get_fight_stats(char, since, event_id)
                 total_wins += wins
                 total_losses += losses
                 total_fights += fights
 
-                rating, rd, vol = get_glicko_rating(char)
+                rating, rd, vol, _ = get_glicko_rating_extended(char, event_id)
                 glicko_values.append(rating)
 
-                last_active = get_last_active_day(char)
+                last_active = get_last_active_day(char, event_id)
                 if last_active:
                     days_ago = (datetime.utcnow().date() - last_active).days
                     recent_days.append(days_ago)
 
-            # ⚖️  Filtering: minimum 10 fights, no 100% wins
+            # ⚖️ Filtering
             if total_fights < 10:
                 continue
             if total_wins > 0 and total_losses == 0:
@@ -1025,7 +1055,6 @@ def setup_commands(bot: commands.Bot):
                 winrate, avg_active
             ))
 
-        # 🥇 Sorting: first by MMR, then by wins, then by name
         leaderboard_data.sort(key=lambda x: (-x[3], -x[5], x[0]))
 
         # 🔹 Short output
@@ -1044,10 +1073,10 @@ def setup_commands(bot: commands.Bot):
                 await view.send_initial(interaction)
             return
 
-        # 📊 Detail output
+        # 📊 Detailed output
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
         embed = discord.Embed(
-            title=f"Top-{count} MMR in {days} day(s)",
+            title=f"Top-{count} MMR in {days} day(s) ({event or 'default'})",
             color=discord.Color.gold()
         )
         if leaderboard_data and leaderboard_data[0][1]:
@@ -1082,7 +1111,6 @@ def setup_commands(bot: commands.Bot):
             )
 
         await interaction.followup.send(embed=embed, ephemeral=not public)
-
 
     @bot.tree.command(name="mmrroleupdate", description="🔁 Update Glicko-based roles for all users")
     async def mmrroleupdate(interaction: discord.Interaction):
@@ -1165,6 +1193,69 @@ def setup_commands(bot: commands.Bot):
             f"✅ MMR roles updated.\n🧍 Processed: {updated} users\n⏭️ Skipped: {skipped} (no characters or MMR)",
             ephemeral=True
         )
+
+# --- Events ---
+
+    @bot.tree.command(name="createevent", description="Create a new event")
+    @app_commands.describe(name="Event name", description="Event description (optional)")
+    async def createevent(interaction: discord.Interaction, name: str, description: Optional[str] = None):
+        if not await require_admin(interaction):
+            return
+        event_id = create_event(name, description or "")
+        await interaction.response.send_message(
+            f"✅ Event **{name}** создан (ID: `{event_id}`)", ephemeral=True
+        )
+
+    @bot.tree.command(name="setchannel", description="Link a channel to an event (both track & announce)")
+    @app_commands.describe(event="Event name", channel="Channel")
+    async def setchannel(interaction: discord.Interaction, event: str, channel: discord.TextChannel):
+        if not await require_admin(interaction):
+            return
+
+        try:
+            set_event_channel(event, channel.id)
+            await interaction.response.send_message(
+                f"✅ The channel {channel.mention} is linked to the event **{event}** as a `track+announcement`.",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+
+    @bot.tree.command(name="clearchannel", description="Release the channel from the event")
+    @app_commands.describe(event="Event name")
+    async def clearchannel(interaction: discord.Interaction, event: str):
+        if not await require_admin(interaction):
+            return
+
+        cleared = clear_event_channels(event)
+        if cleared:
+            await interaction.response.send_message(
+                f"✅ All channels of the event **{event}** are released.", ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                f"⚠️ The event **{event}** had no fixed channels.", ephemeral=True
+            )
+
+    @bot.tree.command(name="listevents", description="List of all events")
+    async def listevents(interaction: discord.Interaction):
+        if not await require_admin(interaction):
+            return
+
+        events = list_events()
+        if not events:
+            await interaction.response.send_message("❌ There are no events created.", ephemeral=True)
+            return
+
+        embed = discord.Embed(title="📜 List of events", color=discord.Color.gold())
+        for eid, name, desc in events:
+            embed.add_field(
+                name=f"🎯 {name} (ID: {eid})",
+                value=desc if desc else "—",
+                inline=False
+            )
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # --- Help ---
 
