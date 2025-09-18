@@ -165,11 +165,7 @@ async def on_message(message: discord.Message):
             except Exception as e:
                     logging.exception(f"❌ Killstreak announcement failed: {e}")
 
-            # play sound (announcer helper may accept event_id)
-            try:
-                await _call_announcer(play_killstreak_sound, bot, killstreaks[ks_key_killer]["count"], message.guild, event_id=event_id)
-            except Exception as e:
-                    logging.exception(f"❌ Killstreak sound failed: {e}")
+            # sound is handled inside announcer.send_killstreak_announcement to avoid duplicates
 
         # clear victim's killstreak for this event (if any)
         if ks_key_victim in killstreaks:

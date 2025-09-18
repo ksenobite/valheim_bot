@@ -136,8 +136,7 @@ async def generate_stats_embeds(
             # победы
             c.execute("""
                 SELECT victim, COUNT(*) FROM frags
-                WHERE killer = ? AND timestamp >= ?
-                AND (? IS NULL OR event_id = ?)
+                WHERE killer = ? AND timestamp >= ? AND (? IS NULL OR event_id = ?)
                 GROUP BY victim
             """, (character, since, event_id, event_id))
             for victim, count in c.fetchall():
@@ -146,8 +145,7 @@ async def generate_stats_embeds(
             # поражения
             c.execute("""
                 SELECT killer, COUNT(*) FROM frags
-                WHERE victim = ? AND timestamp >= ?
-                AND (? IS NULL OR event_id = ?)
+                WHERE victim = ? AND timestamp >= ? AND (? IS NULL OR event_id = ?)
                 GROUP BY killer
             """, (character, since, event_id, event_id))
             for killer, count in c.fetchall():
@@ -216,7 +214,7 @@ async def generate_stats_embeds(
         manual = 0
         natural = 0
         for char in characters:
-            m, n = get_win_sources(char)
+            m, n = get_win_sources(char, event_id=event_id)
             manual += m
             natural += n
 

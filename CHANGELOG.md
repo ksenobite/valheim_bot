@@ -1,8 +1,40 @@
 #### 📄 `CHANGELOG.md`
 ```markdown
 
-## v7.0.0 — 2025-06-20
+## v8.0.0 — 2025-09-18
+### Added
+- 🏟️ **Events support**:
+  - The bot can now be linked to multiple PvP events (e.g., different arenas or tournaments).
+  - Each event is associated with its own text channel and webhook.
+  - Stats commands (`/top`, `/topmmr`, `/mystats`, `/stats`) now include an `event` parameter to filter results per event.
+  - If the parameter is not specified, the **default event** (`arena`) is used.
+  - 👑 **Roles** are still assigned **only for the default event**.
 
+- 🆕 New admin commands:
+  - `/createevent` — create a new event.
+  - `/setchannel` — bind a channel to an event (both track+announce).
+  - `/clearchannel` — unbind a channel from an event.
+  - `/listevents` — list all events with their assigned channels.
+
+### Changed
+- 🔄 Announcement logic refactored: `track` and `announce` have been merged into the `/setchannel` command.
+- ✏️ Removed deprecated commands:
+  - `/style`
+  - `/announce` (replaced by `/setchannel`)
+  - `/track` (replaced by `/setchannel`)
+
+### Fixed
+- 🐛 Fixed desynchronization between **online MMR calculation** (real-time) and deep analysis (`/mmrsync`).
+  - Now `/mmrsync` is only required after a reset (`/mmrclear`) or when restoring the database from a backup.
+
+### Migration Notes
+- ⚠️ Users with **legacy databases** are strongly advised to:
+  - Make a backup,
+  - Delete the old database,
+  - Let the bot create a fresh one on startup.
+- 📌 Reason: migrating from the old schema to the new event model is complex and may cause errors.
+
+## v7.0.0 — 2025-06-20
 ### Added
 - 📈 Advanced **matchmaking rating system** (Glicko-2): rating, deviation (RD), and volatility
 - 🧮 New rating commands:

@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from typing import Optional
 from discord import VoiceClient
 
-from db import get_announce_channel_id, get_announce_style, get_event_channel
+from db import get_event_channel
 from utils import resolve_display_data 
 
 SOUNDS_DIR = None
@@ -33,48 +33,23 @@ class SimpleAudioSource(discord.AudioSource):
     def cleanup(self):
         self.wave.close()
 
-# --- 🎶 Frags Styles ---
+# --- 🎶 Titles (fixed)
 
-KILLSTREAK_STYLES = {
-    "classic": {
-        2: {"title": "🔥 DOUBLE KILL 🔥", "emojis": "🔥"},
-        3: {"title": "⚡️ TRIPLE KILL ⚡️", "emojis": "⚡️"},
-        4: {"title": "💥 ULTRA KILL 💥", "emojis": "💥"},
-        5: {"title": "💀 RAMPAGE 💀", "emojis": "💀"},
-    },
-    "epic": {
-        2: {"title": "🌟 DOUBLE SLASH", "emojis": "⚡⚡"},
-        3: {"title": "🌪️ WHIRLWIND TRIPLE", "emojis": "🌪️🌪️🌪️"},
-        4: {"title": "🔥 BLAZING ULTRA", "emojis": "🔥🔥🔥"},
-        5: {"title": "👑 LEGENDARY RAMPAGE", "emojis": "👑🔥👑"},
-    },
-    "tournament": {
-        2: {"title": "⚡ 2 FRAGS", "emojis": "⚡"},
-        3: {"title": "⚡ 3 FRAGS", "emojis": "⚡⚡"},
-        4: {"title": "⚡ 4 FRAGS", "emojis": "⚡⚡⚡"},
-        5: {"title": "⚡ 5 FRAGS", "emojis": "⚡⚡⚡⚡"},
-    }
+KILLSTREAK_TITLES = {
+    2: "🔥 DOUBLE KILL 🔥",
+    3: "⚡️ TRIPLE KILL ⚡️",
+    4: "💥 ULTRA KILL 💥",
+    5: "💀 RAMPAGE 💀",
 }
 
-DEATHLESS_STYLES = {
-    "classic": {
-        3: {"title": "⚔️KILLING SPREE⚔️ ", "emojis": "⚔️"},
-        4: {"title": "🔥 DOMINATING! 🔥", "emojis": "🔥"},
-        5: {"title": "⚡️ MEGA KILL! ⚡️", "emojis": "⚡️"},
-        6: {"title": "💥UNSTOPPABLE💥", "emojis": "💥"},
-        7: {"title": "💀 WICKED SICK! 💀", "emojis": "💀"},
-        8: {"title": "😈MONSTER KILL😈", "emojis": "😈"},
-        9: {"title": "👑 GODLIKE!!! 👑", "emojis": "👑"},
-    },
-    "epic": {
-        3: {"title": "⚔️ THEY’RE FALLING!", "emojis": "⚔️⚔️"},
-        4: {"title": "⚡ GAINING MOMENTUM!", "emojis": "⚡⚡"},
-        5: {"title": "🔥 ABSOLUTE DOMINANCE!", "emojis": "🔥🔥"},
-        6: {"title": "🌪️ CAN’T BE STOPPED!", "emojis": "🌪️🌪️"},
-        7: {"title": "😈 PURE CARNAGE!", "emojis": "😈🔥"},
-        8: {"title": "💀 MONSTER OF THE ARENA!", "emojis": "💀👑"},
-        9: {"title": "👑 THE GOD OF WAR!", "emojis": "👑✨"},
-    }
+DEATHLESS_TITLES = {
+    3: "⚔️KILLING SPREE⚔️ ",
+    4: "🔥 DOMINATING! 🔥",
+    5: "⚡️ MEGA KILL! ⚡️",
+    6: "💥UNSTOPPABLE💥",
+    7: "💀 WICKED SICK! 💀",
+    8: "😈MONSTER KILL😈",
+    9: "👑 GODLIKE!!! 👑",
 }
 
 def set_sounds_path(path):
@@ -129,11 +104,10 @@ async def send_killstreak_announcement(
         avatar_url = None
         color = discord.Color.orange()
 
-    embed = discord.Embed(
-        title=f"🔥 {streak_count} KILL STREAK!",
-        description=f"**{name.upper()}** is on fire with a {streak_count}-kill streak!",
-        color=color
-    )
+    # Title by fixed map; fallback to generic if missing
+    title = KILLSTREAK_TITLES.get(streak_count, f"🔥 {streak_count} KILL STREAK!")
+    description = f"**{name.upper()}** is on a killstreak: `{streak_count}`"
+    embed = discord.Embed(title=title, description=description, color=color)
     if avatar_url:
         embed.set_thumbnail(url=avatar_url)
 
@@ -171,8 +145,7 @@ async def send_deathless_announcement(
             channel_id = get_event_channel(event_id, "announce")
             logging.debug(f"[DEATHLESS] get_event_channel(event_id={event_id}, 'announce') -> {channel_id}")
         else:
-            channel_id = get_announce_channel_id()  # legacy fallback
-            logging.debug(f"[DEATHLESS] legacy get_announce_channel_id() -> {channel_id}")
+            channel_id = None
     except Exception as e:
         logging.exception(f"[DEATHLESS] Failed to resolve announce channel (event_id={event_id}): {e}")
 
@@ -187,17 +160,9 @@ async def send_deathless_announcement(
         logging.warning(f"[DEATHLESS] ❗ Announce channel not found or not a TextChannel (ID={channel_id})")
         return
 
-    # --- Resolve style ---
-    style_name = get_announce_style()
-    style = DEATHLESS_STYLES.get(style_name)
-    logging.debug(f"[DEATHLESS] announce style -> {style_name}")
-
-    if not style:
-        logging.warning(f"[DEATHLESS] ❗ Unknown announce style for deathless streak: {style_name}")
-        return
-
-    data = style.get(count)
-    if not data:
+    # --- Fixed titles ---
+    title = DEATHLESS_TITLES.get(count)
+    if not title:
         logging.debug(f"[DEATHLESS] No announcement for streak count={count}")
         return
 
@@ -216,17 +181,14 @@ async def send_deathless_announcement(
         color = discord.Color.default()
 
     # --- Embed ---
-    embed = discord.Embed(
-        title=data["title"],
-        description=f"**{name.upper()}** is on a deathless streak!",
-        color=color
-    )
+    description = f"**{name.upper()}** is on a deathless streak: `{count}`"
+    embed = discord.Embed(title=title, description=description, color=color)
     if avatar_url:
         embed.set_thumbnail(url=avatar_url)
 
     try:
         await channel.send(embed=embed)
-        logging.info(f"[DEATHLESS] 📣 Deathless streak embed sent: {data['title']} by {name} to channel {channel.id}")
+        logging.info(f"[DEATHLESS] 📣 Deathless streak embed sent: {title} by {name} to channel {channel.id}")
     except Exception as e:
         logging.exception(f"[DEATHLESS] ❌ Failed to send embed deathless streak announcement: {e}")
 

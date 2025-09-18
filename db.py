@@ -26,47 +26,70 @@ def get_db_path() -> str:
     return DB_FILE
 
 def init_db():
+    """
+    Initialize or migrate the SQLite schema to the current event-aware layout.
+    This function is idempotent and adds missing columns/tables/indexes safely.
+    """
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
-                
-        c.execute("""CREATE TABLE IF NOT EXISTS frags (
-            id INTEGER PRIMARY KEY,
-            killer TEXT,
-            victim TEXT,
-            timestamp DATETIME
-        )""")
 
-        c.execute("""CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )""")
-
-        c.execute("""CREATE TABLE IF NOT EXISTS character_map (
-            character TEXT PRIMARY KEY,
-            discord_id INTEGER NOT NULL
-        )""")
-
-        c.execute("""CREATE TABLE IF NOT EXISTS deathless_streaks (
-            character TEXT PRIMARY KEY,
-            count INTEGER NOT NULL
-        )""")
-        
-        c.execute("""CREATE TABLE IF NOT EXISTS manual_adjustments (
-            character TEXT NOT NULL,
-            adjustment INTEGER NOT NULL,
-            reason TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )""")
-        
-        c.execute("""CREATE TABLE IF NOT EXISTS glicko_ratings (
-            character TEXT PRIMARY KEY,
-            rating REAL DEFAULT 1500,
-            rd REAL DEFAULT 350,
-            vol REAL DEFAULT 0.06,
-            last_win TEXT
-        )
+        # --- Core tables (create if missing) ---
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
         """)
-        
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS character_map (
+                character TEXT PRIMARY KEY,
+                discord_id INTEGER NOT NULL
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS manual_adjustments (
+                character TEXT NOT NULL,
+                adjustment INTEGER NOT NULL,
+                reason TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # frags with event_id
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS frags (
+                id INTEGER PRIMARY KEY,
+                killer TEXT,
+                victim TEXT,
+                timestamp DATETIME,
+                event_id INTEGER
+            )
+        """)
+
+        # deathless_streaks with optional event_id
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS deathless_streaks (
+                character TEXT,
+                count INTEGER NOT NULL,
+                event_id INTEGER
+            )
+        """)
+
+        # glicko_ratings target schema (event-aware, composite PK)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS glicko_ratings (
+                character TEXT NOT NULL,
+                rating REAL DEFAULT 1500,
+                rd REAL DEFAULT 350,
+                vol REAL DEFAULT 0.06,
+                last_activity TEXT,
+                event_id INTEGER NOT NULL,
+                PRIMARY KEY (character, event_id)
+            )
+        """)
+
         c.execute("""
             CREATE TABLE IF NOT EXISTS glicko_history (
                 character TEXT NOT NULL,
@@ -75,7 +98,156 @@ def init_db():
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
-                        
+
+        # Events support
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                description TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS event_channels (
+                event_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL UNIQUE,
+                channel_type TEXT NOT NULL CHECK(channel_type IN ('track','announce')),
+                PRIMARY KEY(event_id, channel_id, channel_type)
+            )
+        """)
+
+        # Rank/MMR roles
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS rank_roles (
+                wins_threshold INTEGER PRIMARY KEY,
+                role_name TEXT NOT NULL
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS mmr_roles (
+                threshold INTEGER PRIMARY KEY,
+                role_name TEXT NOT NULL
+            )
+        """)
+
+        # --- Migrations: add missing columns (legacy DBs) ---
+        def ensure_column(table: str, column: str, ddl: str):
+            if not _table_has_column(conn, table, column):
+                try:
+                    c.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+                except sqlite3.OperationalError:
+                    pass
+
+        ensure_column("frags", "event_id", "event_id INTEGER")
+        ensure_column("deathless_streaks", "event_id", "event_id INTEGER")
+        ensure_column("manual_adjustments", "event_id", "event_id INTEGER")
+        ensure_column("glicko_history", "event_id", "event_id INTEGER")
+        # rename last_win -> last_activity is non-trivial; just ensure last_activity exists
+        # If legacy glicko_ratings exists without composite PK, rebuild it to the new schema
+        try:
+            c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='glicko_ratings'")
+            row = c.fetchone()
+            ddl = row[0] if row else ""
+        except Exception:
+            ddl = ""
+
+        needs_rebuild = False
+        if ddl:
+            normalized = ddl.replace("`", "").replace("\n", " ").lower()
+            if "primary key (character, event_id)" not in normalized:
+                needs_rebuild = True
+
+        if needs_rebuild:
+            # Detect available columns for legacy copy
+            has_event = _table_has_column(conn, "glicko_ratings", "event_id")
+            has_last_activity = _table_has_column(conn, "glicko_ratings", "last_activity")
+            has_last_win = _table_has_column(conn, "glicko_ratings", "last_win")
+
+            # Ensure default event exists and get its id for legacy rows
+            from_this_default = get_default_event_id()
+
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS glicko_ratings__new (
+                    character TEXT NOT NULL,
+                    rating REAL DEFAULT 1500,
+                    rd REAL DEFAULT 350,
+                    vol REAL DEFAULT 0.06,
+                    last_activity TEXT,
+                    event_id INTEGER NOT NULL,
+                    PRIMARY KEY (character, event_id)
+                )
+            """)
+
+            # Build INSERT ... SELECT depending on legacy columns
+            last_expr = "NULL"
+            if has_last_activity:
+                last_expr = "last_activity"
+            elif has_last_win:
+                last_expr = "last_win"
+
+            event_expr = "event_id" if has_event else str(int(from_this_default))
+
+            select_sql = f"""
+                INSERT OR IGNORE INTO glicko_ratings__new
+                    (character, rating, rd, vol, last_activity, event_id)
+                SELECT
+                    character,
+                    COALESCE(rating, 1500),
+                    COALESCE(rd, 350),
+                    COALESCE(vol, 0.06),
+                    {last_expr},
+                    {event_expr}
+                FROM glicko_ratings
+            """
+            c.execute(select_sql)
+
+            c.execute("DROP TABLE IF EXISTS glicko_ratings")
+            c.execute("ALTER TABLE glicko_ratings__new RENAME TO glicko_ratings")
+
+        # --- Indices to speed up queries ---
+        c.execute("CREATE INDEX IF NOT EXISTS idx_frags_killer ON frags(killer)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_frags_victim ON frags(victim)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_frags_timestamp ON frags(timestamp)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_frags_event ON frags(event_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_char_map_user ON character_map(discord_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_glicko_event_char ON glicko_ratings(event_id, character)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_event_channels_event ON event_channels(event_id)")
+
+        # Helpful indices for new event-aware tables
+        c.execute("CREATE INDEX IF NOT EXISTS idx_manual_character_event ON manual_adjustments(character, event_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_gh_character_event ON glicko_history(character, event_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_ds_character_event ON deathless_streaks(character, event_id)")
+
+        # --- Backfill NULL event_id to default event (id=1 typically) for legacy rows ---
+        try:
+            default_event_id = get_default_event_id()
+        except Exception:
+            default_event_id = 1
+
+        try:
+            c.execute("UPDATE frags SET event_id = ? WHERE event_id IS NULL", (default_event_id,))
+        except Exception:
+            pass
+        try:
+            c.execute("UPDATE manual_adjustments SET event_id = ? WHERE event_id IS NULL", (default_event_id,))
+        except Exception:
+            pass
+        try:
+            c.execute("UPDATE glicko_history SET event_id = ? WHERE event_id IS NULL", (default_event_id,))
+        except Exception:
+            pass
+        try:
+            c.execute("UPDATE deathless_streaks SET event_id = ? WHERE event_id IS NULL", (default_event_id,))
+        except Exception:
+            pass
+        try:
+            c.execute("UPDATE glicko_ratings SET event_id = ? WHERE event_id IS NULL", (default_event_id,))
+        except Exception:
+            pass
+
         conn.commit()
 
 def get_setting(key):
@@ -90,23 +262,6 @@ def set_setting(key, value):
         c = conn.cursor()
         c.execute("REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
         conn.commit()
-
-# --- Announce ---
-
-def get_tracking_channel_id():
-    val = get_setting("tracking_channel_id")
-    return int(val) if val else None
-
-def get_announce_channel_id():
-    val = get_setting("announce_channel_id")
-    return int(val) if val else None
-
-def get_announce_style():
-    val = get_setting("announce_style")
-    return val if val else "classic"
-
-def set_announce_style(style_name):
-    set_setting("announce_style", style_name)
 
 # --- Stats ---
 
@@ -272,7 +427,7 @@ def increment_deathless_streak(character: str) -> int:
     """
     current = get_deathless_streak(character)
     new_value = current + 1
-    with sqlite3.connect(get_db_file_path()) as conn:
+    with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
         c.execute("""
             INSERT INTO deathless_streaks (character, count)
@@ -362,7 +517,7 @@ def clear_deathless_streaks():
     """
     Deletes all entries from the deathless_streaks table at startup.
     """
-    with sqlite3.connect(get_db_file_path()) as conn:
+    with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
         c.execute("DELETE FROM deathless_streaks")
         conn.commit()
@@ -370,7 +525,7 @@ def clear_deathless_streaks():
 
 # --- Adjustment ---
 
-def get_total_wins(character: str, days: int = 7) -> int:
+def get_total_wins(character: str, days: int = 7, event_id: Optional[int] = None) -> int:
     """
     Counts the total number of wins in N days, taking into account manual adjustments.
     """
@@ -379,53 +534,59 @@ def get_total_wins(character: str, days: int = 7) -> int:
         c = conn.cursor()
         
         # Fragment wins
+        if event_id is None:
+            event_id = get_default_event_id()
         c.execute("""
             SELECT COUNT(*) FROM frags
-            WHERE killer = ? AND timestamp >= ?
-        """, (character.lower(), since))
+            WHERE killer = ? AND timestamp >= ? AND event_id = ?
+        """, (character.lower(), since, event_id))
         frag_wins = c.fetchone()[0] or 0
 
         # Manual adjustments
         c.execute("""
             SELECT SUM(adjustment) FROM manual_adjustments
-            WHERE character = ? AND timestamp >= ?
-        """, (character.lower(), since))
+            WHERE character = ? AND timestamp >= ? AND event_id = ?
+        """, (character.lower(), since, event_id))
         manual_delta = c.fetchone()[0] or 0
 
         return frag_wins + manual_delta
 
-def get_total_wins_for_user(discord_id: int) -> int:
+def get_total_wins_for_user(discord_id: int, days: int = 7, event_id: Optional[int] = None) -> int:
     """
     Returns the total points of all the user's characters (frags + adjustments).
     """
     total = 0
     for character in get_user_characters(discord_id):
-        total += get_total_wins(character)
+        total += get_total_wins(character, days=days, event_id=event_id)
     return total
 
-def adjust_wins(character: str, delta: int, reason: Optional[str] = None):
+def adjust_wins(character: str, delta: int, reason: Optional[str] = None, event_id: Optional[int] = None):
     """
     Adds a victory adjustment to manual_adjustments.
     """
+    if event_id is None:
+        event_id = get_default_event_id()
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
         c.execute("""
-            INSERT INTO manual_adjustments (character, adjustment, reason)
-            VALUES (?, ?, ?)
-        """, (character.lower(), delta, reason))
+            INSERT INTO manual_adjustments (character, adjustment, reason, event_id)
+            VALUES (?, ?, ?, ?)
+        """, (character.lower(), delta, reason, event_id))
         conn.commit()
-        logging.info(f"✏️\tManual win adjustment: {character} -> {delta} ({reason})")
+        logging.info(f"✏️\tManual win adjustment: {character} -> {delta} ({reason}) [event_id={event_id}]")
 
-def get_win_sources(character: str) -> tuple[int, int]:
+def get_win_sources(character: str, event_id: Optional[int] = None) -> tuple[int, int]:
     """
     Returns a tuple of (manual, natural) wins.
     """
+    if event_id is None:
+        event_id = get_default_event_id()
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
-        c.execute("SELECT SUM(adjustment) FROM manual_adjustments WHERE character = ?", (character.lower(),))
+        c.execute("SELECT SUM(adjustment) FROM manual_adjustments WHERE character = ? AND event_id = ?", (character.lower(), event_id))
         manual = c.fetchone()[0] or 0
 
-        c.execute("SELECT COUNT(*) FROM frags WHERE killer = ?", (character.lower(),))
+        c.execute("SELECT COUNT(*) FROM frags WHERE killer = ? AND event_id = ?", (character.lower(), event_id))
         natural = c.fetchone()[0] or 0
 
         return manual, natural
@@ -749,25 +910,47 @@ def recalculate_glicko_recent(days: int = 30):
 # --- Events ---
 
 def create_event(name: str, description: Optional[str] = None) -> int:
-    name = name.strip().lower()
+    """
+    Create a new event. Raises ValueError if an event with the same name already exists.
+    Returns the new event's id as int.
+    """
+    if not name or not name.strip():
+        raise ValueError("Event name cannot be empty.")
+
+    normalized = name.strip().lower()
+
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
-        c.execute("INSERT OR IGNORE INTO events (name, description) VALUES (?, ?)", (name, description))
+
+        # Check uniqueness
+        c.execute("SELECT id FROM events WHERE name = ?", (normalized,))
+        if c.fetchone():
+            raise ValueError(f"❌ Event `{normalized}` already exists.")
+
+        # Insert
+        c.execute("INSERT INTO events (name, description) VALUES (?, ?)", (normalized, description))
         conn.commit()
-        c.execute("SELECT id FROM events WHERE name = ?", (name,))
+
+        # Explicitly fetch the id to avoid relying on lastrowid (type could be None)
+        c.execute("SELECT id FROM events WHERE name = ?", (normalized,))
         row = c.fetchone()
-        if row is None:
-            # Something went wrong, so we throw an exception so that the code calls it explicitly.
-            logging.error(f"Failed to create/find event '{name}' in DB")
-            raise RuntimeError(f"Failed to create or fetch event '{name}'")
+        if not row:
+            logging.error(f"Failed to create/find event '{normalized}' in DB after insert.")
+            raise RuntimeError(f"Failed to create or fetch event '{normalized}'")
         return int(row[0])
 
 def get_event_by_name(name: str) -> Optional[tuple]:
-    if not name:
+    """
+    Return the event row (id, name, description, created_at) for the normalized event name,
+    or None if not found.
+    """
+    if not name or not name.strip():
         return None
+
+    normalized = name.strip().lower()
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
-        c.execute("SELECT id, name, description, created_at FROM events WHERE name = ?", (name.strip().lower(),))
+        c.execute("SELECT id, name, description, created_at FROM events WHERE name = ?", (normalized,))
         return c.fetchone()
 
 def get_event_id_by_channel(channel_id: int) -> Optional[int]:
@@ -779,21 +962,22 @@ def get_event_id_by_channel(channel_id: int) -> Optional[int]:
 
 def set_event_channel(event_name: str, channel_id: int) -> bool:
     """
-    Binds a channel to an event both as a track and as an announcement.
+    Binds a channel to an existing event as a track+announcement.
+    If the event does not exist, it triggers an exception.
     """
     event = get_event_by_name(event_name)
     if not event:
-        event_id = create_event(event_name)
-    else:
-        event_id = event[0]
+        raise ValueError(f"❌ Event `{event_name}` not found.")
+
+    event_id = event[0]
 
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
 
-        # Deleting the old bindings of this channel (if any)
+        # Delete the old bindings of this channel (if any)
         c.execute("DELETE FROM event_channels WHERE channel_id = ?", (int(channel_id),))
 
-        # Adding both entries
+        # Adding both bindings (track + announce)
         c.execute("""
             INSERT INTO event_channels (event_id, channel_id, channel_type)
             VALUES (?, ?, 'track')
@@ -817,9 +1001,21 @@ def clear_event_channels(event_name: str):
         conn.commit()
 
 def list_events() -> list[tuple]:
+    """
+    Returns a list of events with a description and
+    an associated announcement channel (if any).
+    Format: (name, description, channel_id, is_default)
+    """
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
-        c.execute("SELECT id, name, description FROM events ORDER BY created_at DESC")
+        c.execute("""
+            SELECT e.name, e.description, ec.channel_id, 
+                   CASE WHEN e.id = 1 THEN 1 ELSE 0 END as is_default
+            FROM events e
+            LEFT JOIN event_channels ec 
+                   ON e.id = ec.event_id AND ec.channel_type = 'announce'
+            ORDER BY e.created_at DESC
+        """)
         return c.fetchall()
 
 def get_default_event_id() -> int:
@@ -872,4 +1068,3 @@ def get_event_channel(event_id: int, channel_type: str) -> Optional[int]:
         row = c.fetchone()
         logging.debug(f"DEBUG get_event_channel(event_id={event_id}, channel_type={channel_type}) -> {row}")
         return int(row[0]) if row else None
-

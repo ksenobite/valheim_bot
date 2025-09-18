@@ -28,56 +28,6 @@ def setup_commands(bot: commands.Bot):
     
     # --- Admin commands ---
 
-    @bot.tree.command(name="track", description="Show or set the tracking channel")
-    @app_commands.describe(channel="Channel")
-    async def track(interaction: Interaction, channel: Optional[discord.TextChannel] = None):
-        if not await require_admin(interaction):
-            return
-        if channel:
-            set_setting("tracking_channel_id", str(channel.id))
-            await interaction.response.send_message(f"✅ Tracking channel set to {channel.mention}.", ephemeral=True)
-        else:
-            cid = get_tracking_channel_id()
-            if cid:
-                
-                if not interaction.guild:
-                    await interaction.response.send_message("❌ This command must be used in a server.", ephemeral=True)
-                    return
-                
-                chan = interaction.guild.get_channel(cid)
-                
-                if chan:
-                    await interaction.response.send_message(f"✅ Current tracking channel: {chan.mention}", ephemeral=True)
-                else:
-                    await interaction.response.send_message("❗ Tracking channel not found.", ephemeral=True)
-            else:
-                await interaction.response.send_message("⚠️ Tracking channel is not set.", ephemeral=True)
-
-    @bot.tree.command(name="announce", description="Show or set the announce channel")
-    @app_commands.describe(channel="Channel")
-    async def announce(interaction: Interaction, channel: Optional[discord.TextChannel] = None):
-        if not await require_admin(interaction):
-            return
-        if channel:
-            set_setting("announce_channel_id", str(channel.id))
-            await interaction.response.send_message(f"✅ Announce channel set to {channel.mention}.", ephemeral=True)
-        else:
-            cid = get_announce_channel_id()
-            if cid:
-                
-                if not interaction.guild:
-                    await interaction.response.send_message("❌ This command must be used in a server.", ephemeral=True)
-                    return
-                
-                chan = interaction.guild.get_channel(cid)
-                
-                if chan:
-                    await interaction.response.send_message(f"✅ Current announce channel: {chan.mention}", ephemeral=True)
-                else:
-                    await interaction.response.send_message("❗ Announce channel not found.", ephemeral=True)
-            else:
-                await interaction.response.send_message("⚠️ Announce channel is not set.", ephemeral=True)
-
     @bot.tree.command(name="killstreaktimeout", description="Show or set the killstreak timeout (in seconds)")
     @app_commands.describe(seconds="New timeout value in seconds")
     async def killstreaktimeout(interaction: Interaction, seconds: Optional[int] = None):
@@ -122,7 +72,7 @@ def setup_commands(bot: commands.Bot):
 
     @bot.tree.command(name="roleset", description="Set a rank role for a win threshold")
     @describe(wins="Minimum number of wins for the role", role="Discord role to assign")
-    async def roleet(interaction: Interaction, wins: int, role: discord.Role):
+    async def roleset(interaction: Interaction, wins: int, role: discord.Role):
         if not await require_admin(interaction):
             return
         if wins < 0:
@@ -143,7 +93,7 @@ def setup_commands(bot: commands.Bot):
         await interaction.followup.send("✅ Roles updated.")
 
     @bot.tree.command(name="roleclear", description="Clear all configured rank roles")
-    async def rankclear(interaction: Interaction):
+    async def roleclear(interaction: Interaction):
         if not await require_admin(interaction):
             return
         clear_rank_roles()
@@ -153,15 +103,19 @@ def setup_commands(bot: commands.Bot):
     @app_commands.describe(
         target="Character or @user",
         amount="Number of points to add (or subtract)",
-        reason="Optional reason"
+        reason="Optional reason",
+        event="Event name (optional)"
     )
-    async def points(interaction: Interaction, target: str, amount: int, reason: str = "Manual adjustment"):
+    async def points(interaction: Interaction, target: str, amount: int, reason: str = "Manual adjustment", event: Optional[str] = None):
         
         if not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
+
+        # Resolve event_id
+        event_id = get_event_id_by_name(event) if event else get_default_event_id()
 
         # We determine who we are correcting
         if match := re.match(r"<@!?(\d+)>", target):  # if @user
@@ -175,7 +129,7 @@ def setup_commands(bot: commands.Bot):
 
         # Making adjustments for each character
         for character in characters:
-            adjust_wins(character, amount, reason)
+            adjust_wins(character, amount, reason, event_id=event_id)
 
         # ✅ Response
         char_list = "\n".join(f"- `{char}`" for char in characters)
@@ -193,14 +147,16 @@ def setup_commands(bot: commands.Bot):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @bot.tree.command(name="pointlog", description="Show manual adjustment history")
-    @app_commands.describe(target="Character name or @user")
-    async def pointlog(interaction: Interaction, target: str):
+    @app_commands.describe(target="Character name or @user", event="Event name (optional)")
+    async def pointlog(interaction: Interaction, target: str, event: Optional[str] = None):
         
         if not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
+
+        event_id = get_event_id_by_name(event) if event else get_default_event_id()
 
         # Get characters
         if match := re.match(r"<@!?(\d+)>", target):
@@ -213,17 +169,17 @@ def setup_commands(bot: commands.Bot):
             characters = [target.lower()]
 
         # Collecting the history of adjustments
-        with sqlite3.connect(get_db_file_path()) as conn:
+        with sqlite3.connect(get_db_path()) as conn:
             c = conn.cursor()
             placeholders = ",".join("?" for _ in characters)
             query = f"""
                 SELECT character, adjustment, reason, timestamp
                 FROM manual_adjustments
-                WHERE character IN ({placeholders})
+                WHERE character IN ({placeholders}) AND event_id = ?
                 ORDER BY timestamp DESC
                 LIMIT 20
             """
-            c.execute(query, characters)
+            c.execute(query, (*characters, event_id))
             rows = c.fetchall()
 
         if not rows:
@@ -290,25 +246,7 @@ def setup_commands(bot: commands.Bot):
         asyncio.create_task(audio_queue_worker(bot, interaction.guild))
         asyncio.create_task(start_heartbeat_loop(bot, interaction.guild))
 
-    @bot.tree.command(name="style", description="Show or set the killstreak announce style")
-    @app_commands.describe(style="Style name (classic, epic, tournament)")
-    async def style(interaction: Interaction, style: Optional[str] = None):
-        if not await require_admin(interaction):
-            return
-        available_styles = list(KILLSTREAK_STYLES.keys())
-        if style:
-            style = style.lower()
-            if style not in available_styles:
-                await interaction.response.send_message(
-                    f"Invalid style. Available: {', '.join(available_styles)}",
-                    ephemeral=True
-                )
-                return
-            set_announce_style(style)
-            await interaction.response.send_message(f"✅ Announce style set to **{style}**.", ephemeral=True)
-        else:
-            current_style = get_announce_style()
-            await interaction.response.send_message(f"✅ Current announce style is **{current_style}**.", ephemeral=True)
+    # /style command removed (styles are fixed)
 
     @bot.tree.command(name="reset", description="Reset the database or restore from backup")
     @app_commands.describe(backup="Name of the backup file to restore (optional)")
@@ -384,10 +322,10 @@ def setup_commands(bot: commands.Bot):
             """, (since, event_id))
             raw_stats = c.fetchall()
 
-        # 📊 Aggregate frags and manual points
+        # 📊 Aggregate frags and manual points (event-aware)
         user_points = {}
         for character, frags in raw_stats:
-            manual, _ = get_win_sources(character)
+            manual, _ = get_win_sources(character, event_id=event_id)
             discord_id = get_character_owner(character)
             key = discord_id if discord_id else character
 
@@ -491,9 +429,21 @@ def setup_commands(bot: commands.Bot):
             return
 
         avatar_url = interaction.user.display_avatar.url if hasattr(interaction.user, "display_avatar") else None
+        # filter characters by activity in this event and time window
+        since = datetime.utcnow() - timedelta(days=days)
+        filtered_characters = []
+        for ch in characters:
+            w, l, t = get_fight_stats(ch, since, event_id)
+            if t > 0:
+                filtered_characters.append(ch)
+
+        if not filtered_characters:
+            await interaction.followup.send("❌ No stats available for this player.", ephemeral=not public)
+            return
+
         embeds = await generate_stats_embeds(
             interaction,
-            characters,
+            filtered_characters,
             days,
             event_id=event_id,
             avatar_url=avatar_url,
@@ -551,9 +501,21 @@ def setup_commands(bot: commands.Bot):
         else:
             characters = [player.lower()]
 
+        # filter characters by activity in this event and time window
+        since = datetime.utcnow() - timedelta(days=days)
+        filtered_characters = []
+        for ch in characters:
+            w, l, t = get_fight_stats(ch, since, event_id)
+            if t > 0:
+                filtered_characters.append(ch)
+
+        if not filtered_characters:
+            await interaction.followup.send("❌ No stats available for this player.", ephemeral=not public)
+            return
+
         embeds = await generate_stats_embeds(
             interaction,
-            characters,
+            filtered_characters,
             days,
             event_id=event_id,
             avatar_url=avatar_url,
@@ -644,15 +606,18 @@ def setup_commands(bot: commands.Bot):
     @app_commands.describe(
         target="Character name or @user",
         value="Rating value: +50, -30, or =1500",
-        reason="Optional reason for the change"
+        reason="Optional reason for the change",
+        event="Event name (optional)"
     )
-    async def mmr(interaction: Interaction, target: str, value: str, reason: str = "Manual Glicko adjustment"):
+    async def mmr(interaction: Interaction, target: str, value: str, reason: str = "Manual Glicko adjustment", event: Optional[str] = None):
         
         if not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
+
+        event_id = get_event_id_by_name(event) if event else get_default_event_id()
 
         # 🔍 Define the characters
         if match := re.match(r"<@!?(\d+)>", target):
@@ -694,13 +659,13 @@ def setup_commands(bot: commands.Bot):
                 new_rating = absolute
                 delta_applied = new_rating - rating
 
-            set_glicko_rating(character, new_rating, rd, vol)
+            set_glicko_rating(character, new_rating, rd, vol, event_id=event_id)
 
             with sqlite3.connect(get_db_path()) as conn:
                 conn.execute("""
-                    INSERT INTO glicko_history (character, delta, reason)
-                    VALUES (?, ?, ?)
-                """, (character, delta_applied, reason))
+                    INSERT INTO glicko_history (character, delta, reason, event_id)
+                    VALUES (?, ?, ?, ?)
+                """, (character, delta_applied, reason, event_id))
 
             changed.append((character, rating, new_rating, delta_applied))
 
@@ -719,14 +684,16 @@ def setup_commands(bot: commands.Bot):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @bot.tree.command(name="mmrlog", description="Show Glicko-2 rating adjustment history for a character or user")
-    @app_commands.describe(target="Character name or @user")
-    async def mmrlog(interaction: Interaction, target: str):
+    @app_commands.describe(target="Character name or @user", event="Event name (optional)")
+    async def mmrlog(interaction: Interaction, target: str, event: Optional[str] = None):
         
         if not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
+
+        event_id = get_event_id_by_name(event) if event else get_default_event_id()
 
         if match := re.match(r"<@!?(\d+)>", target):
             user_id = int(match.group(1))
@@ -743,10 +710,10 @@ def setup_commands(bot: commands.Bot):
             c.execute(f"""
                 SELECT character, delta, reason, timestamp
                 FROM glicko_history
-                WHERE character IN ({placeholders})
+                WHERE character IN ({placeholders}) AND event_id = ?
                 ORDER BY timestamp DESC
                 LIMIT 20
-            """, characters)
+            """, (*characters, event_id))
             rows = c.fetchall()
 
         if not rows:
@@ -917,9 +884,10 @@ def setup_commands(bot: commands.Bot):
             logging.exception("❌ Failed to run Glicko MMR sync")
             await interaction.followup.send("❌ Failed to run MMR sync.", ephemeral=True)
 
-    @bot.tree.command(name="mmrclear", description="Admin: Reset and reinitialize all Glicko-2 ratings")
-    async def mmrclear(interaction: discord.Interaction):
-        
+    @bot.tree.command(name="mmrclear", description="🧹 Reset Glicko-2 ratings to default values")
+    @app_commands.describe(event="Optional event name (reset only for this event)")
+    async def mmrclear(interaction: Interaction, event: Optional[str] = None):
+
         if not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
             return
@@ -927,37 +895,119 @@ def setup_commands(bot: commands.Bot):
         await interaction.response.defer(ephemeral=True)
 
         try:
+            # --- Resolve events to process ---
+            events_to_process = []
+
+            if event:
+                ev = get_event_by_name(event)
+                if not ev:
+                    await interaction.followup.send(f"❌ Event `{event}` not found.", ephemeral=True)
+                    return
+                events_to_process = [ev]  # [(id, name, ...)]
+            else:
+                events_to_process = list_events()  # [(id, name, description), ...] or []
+
+            # --- If there are no registered events at all, do a safe global fallback ---
+            global_fallback = False
+            if not events_to_process:
+                # If no rows in events, but DB has ratings/history, do global reset
+                with sqlite3.connect(get_db_path()) as conn:
+                    c = conn.cursor()
+                    c.execute("SELECT COUNT(*) FROM glicko_ratings")
+                    total_ratings = c.fetchone()[0] or 0
+                    c.execute("SELECT COUNT(*) FROM glicko_history")
+                    total_history = c.fetchone()[0] or 0
+
+                if total_ratings == 0 and total_history == 0:
+                    await interaction.followup.send("❌ No events and no rating/history data found.", ephemeral=True)
+                    return
+
+                global_fallback = True
+
+            results = []  # list of (event_name, event_id, players_reset, history_cleared)
+
             with sqlite3.connect(get_db_path()) as conn:
                 c = conn.cursor()
 
-                # Clearing the rating table
-                c.execute("DELETE FROM glicko_ratings")
+                if global_fallback:
+                    # Global: clear all history and reset all ratings
+                    # count rows first for reporting
+                    c.execute("SELECT COUNT(*) FROM glicko_history")
+                    hist_count = c.fetchone()[0] or 0
+                    c.execute("SELECT COUNT(*) FROM glicko_ratings")
+                    ratings_count = c.fetchone()[0] or 0
 
-                # Getting all the unique characters from the frag database
-                c.execute("SELECT DISTINCT killer FROM frags")
-                killers = [row[0].lower() for row in c.fetchall()]
-                c.execute("SELECT DISTINCT victim FROM frags")
-                victims = [row[0].lower() for row in c.fetchall()]
+                    c.execute("DELETE FROM glicko_history")
+                    c.execute("UPDATE glicko_ratings SET rating = 1500, rd = 350")
 
-                all_characters = set(killers + victims)
+                    conn.commit()
+                    results.append(("ALL_EVENTS_GLOBAL", None, ratings_count, hist_count))
 
-                # Reinitialization
-                for character in all_characters:
-                    c.execute("""
-                        INSERT OR REPLACE INTO glicko_ratings (character, rating, rd, vol)
-                        VALUES (?, ?, ?, ?)
-                    """, (character, 1500, 350, 0.06))
+                else:
+                    # Process each event separately
+                    for ev in events_to_process:
+                        # ev expected like (id, name, description) or (id, name, ...)
+                        event_id = ev[0]
+                        event_name = ev[1] if len(ev) > 1 else str(event_id)
 
-                conn.commit()
+                        # count how many history rows and rating rows we will touch
+                        c.execute("SELECT COUNT(*) FROM glicko_history WHERE event_id = ?", (event_id,))
+                        hist_count = c.fetchone()[0] or 0
 
+                        c.execute("SELECT COUNT(*) FROM glicko_ratings WHERE event_id = ?", (event_id,))
+                        ratings_count = c.fetchone()[0] or 0
+
+                        # delete history for this event
+                        c.execute("DELETE FROM glicko_history WHERE event_id = ?", (event_id,))
+
+                        # reset ratings for this event (only rating and rd)
+                        c.execute("UPDATE glicko_ratings SET rating = 1500, rd = 350 WHERE event_id = ?", (event_id,))
+
+                        results.append((event_name, event_id, ratings_count, hist_count))
+
+                    conn.commit()
+
+            # --- Build response embed with details ---
             embed = discord.Embed(
                 title="🧹 Glicko-2 Ratings Reset",
-                description=(
-                    f"Cleared and reinitialized Glicko-2 ratings for **{len(all_characters)}** characters.\n"
-                    f"Default: `1500 ± 350`, vol=0.06"
-                ),
                 color=discord.Color.orange()
             )
+
+            if global_fallback:
+                # single-line summary
+                _, _, ratings_count, hist_count = results[0]
+                embed.description = (
+                    f"Global reset applied.\n\n"
+                    f"Ratings reset: **{ratings_count}** records\n"
+                    f"History cleared: **{hist_count}** records\n\n"
+                    f"Default values → `1500 ± 350`"
+                )
+            else:
+                total_players = sum(r for _, _, r, _ in results)
+                total_hist = sum(h for _, _, _, h in results)
+                embed.description = f"Reset complete for **{len(results)}** event(s).\nTotal players updated: **{total_players}**\nTotal history rows removed: **{total_hist}**\n\nDefault values → `1500 ± 350`"
+
+                for name, eid, num_players, num_hist in results:
+                    # mark default event if it matches
+                    default_event_id = None
+                    try:
+                        default_name = get_setting("default_event")
+                        if default_name:
+                            def_ev = get_event_by_name(default_name)
+                            if def_ev:
+                                default_event_id = def_ev[0]
+                    except Exception:
+                        default_event_id = None
+
+                    label = f"{name}"
+                    if eid is not None and default_event_id is not None and eid == default_event_id:
+                        label = f"{label} (default)"
+
+                    players_text = f"{num_players} player(s) reset" if num_players else "no players"
+                    hist_text = f"{num_hist} history row(s) cleared" if num_hist else "no history"
+
+                    embed.add_field(name=f"✅ {label}", value=f"{players_text} — {hist_text}", inline=False)
+
             embed.set_footer(text="Glicko-2 Admin Tool")
 
             await interaction.followup.send(embed=embed, ephemeral=True)
@@ -1031,10 +1081,10 @@ def setup_commands(bot: commands.Bot):
                     recent_days.append(days_ago)
 
             # # ⚖️ Filtering
-            # if total_fights < 10:
-            #     continue
-            # if total_wins > 0 and total_losses == 0:
-            #     continue
+            if total_fights < 10:
+                continue
+            if total_wins > 0 and total_losses == 0:
+                continue
 
             avg_mmr = round(sum(glicko_values) / len(glicko_values)) if glicko_values else 1500
             avg_active = min(recent_days) if recent_days else 999
@@ -1201,24 +1251,32 @@ def setup_commands(bot: commands.Bot):
     async def createevent(interaction: discord.Interaction, name: str, description: Optional[str] = None):
         if not await require_admin(interaction):
             return
-        event_id = create_event(name, description or "")
-        await interaction.response.send_message(
-            f"✅ Event **{name}** создан (ID: `{event_id}`)", ephemeral=True
-        )
+        try:
+            event_id = create_event(name, description or "")
+            await interaction.response.send_message(
+                f"✅ Event **{name}** created (ID: `{event_id}`)", ephemeral=True
+            )
+        except ValueError as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
+        except Exception as e:
+            logging.exception("❌ Unexpected error in /createevent")
+            await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
 
     @bot.tree.command(name="setchannel", description="Link a channel to an event (both track & announce)")
     @app_commands.describe(event="Event name", channel="Channel")
     async def setchannel(interaction: discord.Interaction, event: str, channel: discord.TextChannel):
         if not await require_admin(interaction):
             return
-
         try:
             set_event_channel(event, channel.id)
             await interaction.response.send_message(
-                f"✅ The channel {channel.mention} is linked to the event **{event}** as a `track+announcement`.",
+                f"✅ The channel {channel.mention} is linked to the event **{event}** as `track+announcement`.",
                 ephemeral=True
             )
+        except ValueError as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
         except Exception as e:
+            logging.exception("❌ Unexpected error in /setchannel")
             await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
 
     @bot.tree.command(name="clearchannel", description="Release the channel from the event")
@@ -1239,15 +1297,32 @@ def setup_commands(bot: commands.Bot):
 
     @bot.tree.command(name="listevents", description="List all events")
     async def listevents(interaction: discord.Interaction):
+        if not await require_admin(interaction):
+            return
+
+        if not interaction.guild:
+            await interaction.response.send_message("❌ This command can only be used in a server.", ephemeral=True)
+            return
+
         events = list_events()
         if not events:
             await interaction.response.send_message("❌ No events found.", ephemeral=True)
             return
 
         embed = discord.Embed(title="📅 Events", color=discord.Color.blue())
-        for eid, name, desc in events:
+
+        for name, desc, channel_id, is_default in events:
+            if channel_id:
+                channel = interaction.guild.get_channel(channel_id)
+                if channel:
+                    channel_display = f"✅ {name}{' (default)' if is_default else ''}: {channel.mention}"
+                else:
+                    channel_display = f"❌ {name}{' (default)' if is_default else ''}: channel not found!"
+            else:
+                channel_display = f"❌ {name}{' (default)' if is_default else ''}: channel is not set!"
+
             embed.add_field(
-                name=f"ID {eid}: {name}",
+                name=channel_display,
                 value=desc or "—",
                 inline=False
             )
@@ -1260,51 +1335,59 @@ def setup_commands(bot: commands.Bot):
     async def helpme(interaction: discord.Interaction):
         embed = discord.Embed(
             title="📖 Bot Command Help",
-            description="Use slash commands to manage PvP stats, MMR, killstreaks and roles.",
+            description="Use slash commands to manage PvP stats, MMR, killstreaks, events and roles.",
             color=discord.Color.purple(),
             timestamp=datetime.utcnow()
         )
 
         # Show admin commands only if member and has permission
         if isinstance(interaction.user, discord.Member) and interaction.user.guild_permissions.administrator:
-            # 🧰 Admin Commands (1/3)
+            # ⚙️ Admin Commands (1/4: Events & Channels)
             embed.add_field(
-                name="__🔧 Admin Commands (1/3):__",
+                name="__⚙️ Admin Commands (1/4: Events & Channels)__",
                 value=(
-                    "⚙️ `/track` `[channel]` — Set tracking channel\n"
-                    "📢 `/announce` `[channel]` — Set announce channel\n"
+                    "🆕 `/createevent` `[name]` `[desc]` — Create new event\n"
+                    "📌 `/setchannel` `[event]` `[channel]` — Bind channel to event\n"
+                    "❌ `/clearchannel` `[event]` — Unbind channel from event\n"
+                    "📅 `/listevents` — Show all events and their channels"
+                ),
+                inline=False
+            )
+            # 🧰 Admin Commands (2/4: Core Settings)
+            embed.add_field(
+                name="__🧰 Admin Commands (2/4: Core Settings)__",
+                value=(
                     "⏳ `/killstreaktimeout` `[seconds]` — Set killstreak timeout\n"
                     "🔗 `/link` `[character]` `[@user]` — Link character to user\n"
                     "❌ `/unlink` `[character]` — Unlink character\n"
                     "🔊 `/voice` `[leave]` — Join or leave voice channel\n"
-                    "🎨 `/style` `[style]` — Set announce style\n"
                     "🔁 `/reset` `[filename]` — Reset or restore database"
                 ),
                 inline=False
             )
-            # 🧰 Admin Commands (2/3)
+            # 🧮 Admin Commands (3/4: Points & Roles)
             embed.add_field(
-                name="__🔧 Admin Commands (2/3):__",
+                name="__🧮 Admin Commands (3/4: Points & Roles)__",
                 value=(
-                    "🧮 `/points` `[char/@user]` `[value]` `[reason]` — Adjust player points\n"
-                    "📜 `/pointlog` `[char/@user]` — Show adjustment history\n"
+                    "🧮 `/points` `[char/@user]` `[±value]` `[reason]` — Adjust player points\n"
+                    "📜 `/pointlog` `[char/@user]` `[event]` — Show adjustment history\n"
                     "👑 `/roleupdate` — Update all rank roles\n"
                     "🥇 `/roleset` `[wins]` `[role]` — Set rank role threshold\n"
                     "🧹 `/roleclear` — Clear all rank roles"
                 ),
                 inline=False
             )
-            # 📊 Admin Commands (3/3 - Points & MMR)
+            # 📊 Admin Commands (4/4: MMR)
             embed.add_field(
-                name="__📊 Admin Commands (3/3):__",
+                name="__📊 Admin Commands (4/4: MMR)__",
                 value=(
-                    "🎯 `/mmr` `[char/@user]` `[+/-/=value]` — Adjust Glicko-2 rating\n"
-                    "📃 `/mmrlog` `[char/@user]` — Show MMR change log\n"
-                    "🏅 `/mmrroleset` `[rating]` `[role]` — Set MMR role\n"
+                    "🎯 `/mmr` `[char/@user]` `[+/-/=value]` `[reason]` `[event]` — Adjust rating\n"
+                    "📃 `/mmrlog` `[char/@user]` `[event]` — Show rating history\n"
+                    "🔁 `/mmrsync` `[event]` — Rebuild MMR from frags\n"
+                    "🧹 `/mmrclear` `[event]` — Reset MMR to defaults\n"
+                    "🏅 `/mmrroleset` `[rating]` `[role]` — Set MMR role threshold\n"
                     "🎭 `/mmrroles` — Show MMR role config\n"
-                    "🧹 `/mmrroleclear` — Clear MMR roles\n"
-                    "🔁 `/mmrsync` — Rebuild MMR from frags\n"
-                    "🛠️ `/mmrclear` — Reset all MMR to default\n"
+                    "🧹 `/mmrroleclear` — Clear all MMR roles\n"
                     "🔄 `/mmrroleupdate` — Update all MMR-based roles"
                 ),
                 inline=False
@@ -1312,18 +1395,20 @@ def setup_commands(bot: commands.Bot):
 
         # 👥 User Commands (always shown)
         embed.add_field(
-            name="__👥 User Commands:__",
+            name="__👥 User Commands__",
             value=(
-                "🏆 `/top` `[players]` `[days]` — Show top by points\n"
-                "📈 `/topmmr` `[players]` `[days]` `[details]` — Show top by MMR\n"
-                "🧍 `/mystats` `[days]` — Show your stats\n"
-                "📊 `/stats` `[char/@user]` `[days]` — Show player stats\n"
+                "🏆 `/top` `[count]` `[days]` `[event]` `[public*]` — Show top by points\n"
+                "📈 `/topmmr` `[count]` `[days]` `[event]` `[public*]` `[details]` — Show top by MMR\n"
+                "🧍 `/mystats` `[days]` `[event]` `[public*]` — Show your stats\n"
+                "📊 `/stats` `[char/@user]` `[days]` `[event]` `[public*]` — Show player stats\n"
                 "🔍 `/whois` `[char/@user]` — Show who owns character\n"
                 "🏅 `/roles` — Show current rank roles\n"
-                "❓ `/helpme` — Show this help message"
+                "❓ `/helpme` — Show this help message\n\n"
+                "`[public*]` → only available to admins"
             ),
             inline=False
         )
 
         embed.set_footer(text=f"Bot version {BOT_VERSION}")
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
