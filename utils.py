@@ -174,9 +174,23 @@ async def generate_stats_embeds(
     page_size = 10
     embeds = []
     for start in range(0, len(stats), page_size):
+        # Get event name for display
+        event_name = "arena"
+        if event_id:
+            try:
+                # Get event name by querying the database
+                with sqlite3.connect(get_db_path()) as conn:
+                    c = conn.cursor()
+                    c.execute("SELECT name FROM events WHERE id = ?", (event_id,))
+                    row = c.fetchone()
+                    if row:
+                        event_name = row[0]
+            except Exception:
+                pass
+
         embed = discord.Embed(color=discord.Color.blue())
         embed.set_author(
-            name=f"📊 Stats for {len(characters)} character(s) in {days} day(s)",
+            name=f"📊 Stats for {len(characters)} character(s) in {days} day(s) - Event: {event_name}",
             icon_url=avatar_url if avatar_url else None
         )
 
@@ -229,7 +243,7 @@ async def generate_stats_embeds(
 
     return embeds
 
-async def generate_topmmr_embeds(interaction: Interaction, leaderboard_data: list, public: bool = False, details: bool = False):
+async def generate_topmmr_embeds(interaction: Interaction, leaderboard_data: list, public: bool = False, details: bool = False, event_name: str = "arena"):
     """
     leaderboard_data: list of tuples
     [(display_name, avatar_url, characters, mmr, fights, wins, losses, winrate, recent_days),...]
@@ -237,7 +251,7 @@ async def generate_topmmr_embeds(interaction: Interaction, leaderboard_data: lis
     embeds = []
     medals = {1: "🥇", 2: "🥈", 3: "🥉"}
 
-    author_text = f"🏆 Top MMR"
+    author_text = f"🏆 Top MMR - Event: {event_name}"
     color = discord.Color.gold()
 
     page_size = 10

@@ -68,12 +68,13 @@ def init_db():
             )
         """)
 
-        # deathless_streaks with optional event_id
+        # deathless_streaks with event_id and composite PK
         c.execute("""
             CREATE TABLE IF NOT EXISTS deathless_streaks (
-                character TEXT,
+                character TEXT NOT NULL,
                 count INTEGER NOT NULL,
-                event_id INTEGER
+                event_id INTEGER NOT NULL,
+                PRIMARY KEY (character, event_id)
             )
         """)
 
@@ -146,6 +147,53 @@ def init_db():
         ensure_column("manual_adjustments", "event_id", "event_id INTEGER")
         ensure_column("glicko_history", "event_id", "event_id INTEGER")
         # rename last_win -> last_activity is non-trivial; just ensure last_activity exists
+        # If legacy deathless_streaks exists without composite PK, rebuild it to the new schema
+        try:
+            c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='deathless_streaks'")
+            row = c.fetchone()
+            ddl = row[0] if row else ""
+        except Exception:
+            ddl = ""
+
+        needs_deathless_rebuild = False
+        if ddl:
+            normalized = ddl.replace("`", "").replace("\n", " ").lower()
+            if "primary key (character, event_id)" not in normalized:
+                needs_deathless_rebuild = True
+
+        if needs_deathless_rebuild:
+            # Detect available columns for legacy copy
+            has_event = _table_has_column(conn, "deathless_streaks", "event_id")
+
+            # Ensure default event exists and get its id for legacy rows
+            from_this_default = get_default_event_id()
+
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS deathless_streaks__new (
+                    character TEXT NOT NULL,
+                    count INTEGER NOT NULL,
+                    event_id INTEGER NOT NULL,
+                    PRIMARY KEY (character, event_id)
+                )
+            """)
+
+            # Build INSERT ... SELECT depending on legacy columns
+            event_expr = "event_id" if has_event else str(int(from_this_default))
+
+            select_sql = f"""
+                INSERT OR IGNORE INTO deathless_streaks__new
+                    (character, count, event_id)
+                SELECT
+                    character,
+                    count,
+                    {event_expr}
+                FROM deathless_streaks
+            """
+            c.execute(select_sql)
+
+            c.execute("DROP TABLE IF EXISTS deathless_streaks")
+            c.execute("ALTER TABLE deathless_streaks__new RENAME TO deathless_streaks")
+
         # If legacy glicko_ratings exists without composite PK, rebuild it to the new schema
         try:
             c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='glicko_ratings'")
@@ -421,19 +469,20 @@ def get_deathless_streak(character: str, event_id: Optional[int] = None) -> int:
         row = c.fetchone()
         return row[0] if row else 0
 
-def increment_deathless_streak(character: str) -> int:
+def increment_deathless_streak(character: str, event_id: Optional[int] = None) -> int:
     """
     Increases the series by 1 and returns a new value.
     """
-    current = get_deathless_streak(character)
+    if event_id is None:
+        event_id = get_default_event_id()
+    current = get_deathless_streak(character, event_id)
     new_value = current + 1
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
         c.execute("""
-            INSERT INTO deathless_streaks (character, count)
-            VALUES (?, ?)
-            ON CONFLICT(character) DO UPDATE SET count = excluded.count
-        """, (character.lower(), new_value))
+            INSERT OR REPLACE INTO deathless_streaks (character, count, event_id)
+            VALUES (?, ?, ?)
+        """, (character.lower(), new_value, event_id))
     return new_value
 
 def reset_deathless_streak(character: str, event_id: Optional[int] = None) -> bool:
@@ -497,7 +546,7 @@ def update_deathless_streaks(killer: str, victim: str, event_id: Optional[int] =
                 c.execute("UPDATE deathless_streaks SET count = ? WHERE character = ? AND event_id = ?", (new_streak, killer, event_id))
             else:
                 new_streak = 1
-                c.execute("INSERT INTO deathless_streaks (character, count, event_id) VALUES (?, ?, ?)", (killer, new_streak, event_id))
+                c.execute("INSERT OR REPLACE INTO deathless_streaks (character, count, event_id) VALUES (?, ?, ?)", (killer, new_streak, event_id))
         else:
             # fallback: old structure (without event_id)
             c.execute("DELETE FROM deathless_streaks WHERE character = ?", (victim,))
@@ -615,7 +664,7 @@ def set_mmr_role(threshold: int, role_name: str):
 
 def get_all_mmr_roles() -> list[tuple[int, str]]:
     with sqlite3.connect(get_db_path()) as conn:
-        cur = conn.execute("SELECT threshold, role_name FROM mmr_roles ORDER BY threshold ASC")
+        cur = conn.execute("SELECT threshold, role_name FROM mmr_roles ORDER BY threshold DESC")
         return cur.fetchall()
 
 def clear_mmr_roles():
@@ -859,17 +908,20 @@ def init_mmr_roles_table():
         """)
         conn.commit()
 
-def recalculate_glicko_recent(days: int = 30):
+def recalculate_glicko_recent(days: int = 30, event_id: Optional[int] = None):
     """
     Rebuild Glicko-2 ratings based on all frags from the last N days.
     Used in /topmmr to get fresh rankings.
     """
+    if event_id is None:
+        event_id = get_default_event_id()
+        
     since = datetime.utcnow() - timedelta(days=days)
     battles_by_day = defaultdict(list)
 
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
-        c.execute("SELECT killer, victim, timestamp FROM frags WHERE timestamp >= ? ORDER BY timestamp ASC", (since,))
+        c.execute("SELECT killer, victim, timestamp FROM frags WHERE timestamp >= ? AND event_id = ? ORDER BY timestamp ASC", (since, event_id))
         rows = c.fetchall()
 
     for killer, victim, ts in rows:
@@ -886,9 +938,9 @@ def recalculate_glicko_recent(days: int = 30):
 
         for killer, victim in fights:
             if killer not in all_players:
-                all_players[killer] = Player(*get_glicko_rating(killer))
+                all_players[killer] = Player(*get_glicko_rating_extended(killer, event_id)[:3])
             if victim not in all_players:
-                all_players[victim] = Player(*get_glicko_rating(victim))
+                all_players[victim] = Player(*get_glicko_rating_extended(victim, event_id)[:3])
 
             p1 = all_players[killer]
             p2 = all_players[victim]
@@ -905,7 +957,8 @@ def recalculate_glicko_recent(days: int = 30):
 
     with sqlite3.connect(get_db_path()) as conn:
         for name, player in all_players.items():
-            set_glicko_rating(name, player.getRating(), player.getRd(), player._vol)
+            last_act = get_last_active_iso(name, event_id=event_id)
+            set_glicko_rating(name, player.getRating(), player.getRd(), player._vol, event_id=event_id, last_activity=last_act)
 
 # --- Events ---
 

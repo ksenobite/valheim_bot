@@ -77,19 +77,76 @@ async def assign_role_based_on_wins(member: discord.Member, days: int = 7):
 async def update_roles_for_all_members(bot: discord.Client, days: int = 7):
     """
     Updates PvP roles for all members across all guilds.
+    Only processes users with activity in the main event (arena).
     """
+    # Check if rank roles are configured
+    roles_config = get_all_rank_roles()
+    if not roles_config:
+        logging.info("⚠️ No rank roles configured - skipping role update")
+        return
+    
+    # Get main event (arena, id=1)
+    main_event_id = get_default_event_id()
+    main_event_name = get_setting("default_event") or "arena"
+    
     for guild in bot.guilds:
         logging.info(f"🔁 Updating roles in guild: {guild.name}")
+        updated = 0
+        skipped = 0
+        no_activity = 0
+        
         for member in guild.members:
-            logging.info(f"🔍 Participant verification: {member.display_name} ({member.id})")
             if member.bot:
                 continue
+                
             characters = get_user_characters(member.id)
             if not characters:
-                logging.info("⛔ There are no linked characters.")
+                skipped += 1
                 continue
-            logging.info(f"✅ Characters found: {characters}")
-            await assign_role_based_on_wins(member, days=days)
+            
+            # Filter characters that have activity in main event
+            active_characters = []
+            for char in characters:
+                # Check if character has any activity (frags) in main event
+                wins, losses, total_fights = get_fight_stats(char, datetime.min, main_event_id)
+                if total_fights > 0:  # Character has activity in main event
+                    active_characters.append(char)
+            
+            if not active_characters:
+                no_activity += 1
+                continue
+            
+            # Calculate total wins only for characters active in main event
+            total_wins = 0
+            for char in active_characters:
+                total_wins += get_total_wins(char, days=days, event_id=main_event_id)
+            
+            role_name = find_role_name_by_wins(total_wins)
+            if not role_name:
+                skipped += 1
+                continue
+            
+            target_role = discord.utils.get(guild.roles, name=role_name)
+            if not target_role:
+                skipped += 1
+                continue
+            
+            # Remove old rank roles and assign new one
+            configured_roles = [rname for _, rname in roles_config]
+            current_roles = [r for r in member.roles if r.name in configured_roles]
+            
+            try:
+                await member.remove_roles(*current_roles, reason="PvP role update")
+                if target_role not in member.roles:
+                    await member.add_roles(target_role, reason="PvP role update")
+                updated += 1
+                logging.info(f"✅ Updated role for {member.display_name}: {role_name} ({total_wins} points)")
+            except discord.Forbidden:
+                logging.warning(f"❌ Can't update roles for {member.display_name} (missing permissions)")
+            except Exception as e:
+                logging.exception(f"⚠️ Unexpected error for {member.display_name}: {e}")
+        
+        logging.info(f"✅ Role update complete for {guild.name}: {updated} updated, {skipped} skipped, {no_activity} no activity")
 
 
 async def update_mmr_roles(bot: discord.Client):
