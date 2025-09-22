@@ -8,7 +8,7 @@ import sqlite3
 from discord import app_commands, Interaction, Member
 from typing import Optional, cast
 from operator import itemgetter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from db import *
 from settings import get_db_file_path
@@ -126,7 +126,7 @@ async def generate_stats_embeds(
         return
     guild = interaction.guild
 
-    since = datetime.utcnow() - timedelta(days=days)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
         victories = {}

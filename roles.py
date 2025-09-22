@@ -5,7 +5,7 @@
 import discord
 import logging
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from db import *
 from typing import Optional
 
@@ -17,7 +17,7 @@ def get_wins_for_user(discord_id: int, days: int = 7) -> int:
     characters = get_user_characters(discord_id)
     if not characters:
         return 0
-    since = datetime.utcnow() - timedelta(days=days)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
     wins = 0
     with sqlite3.connect(get_db_path()) as conn:
         c = conn.cursor()
@@ -90,7 +90,7 @@ async def update_roles_for_all_members(bot: discord.Client, days: int = 7):
     main_event_name = get_setting("default_event") or "arena"
     
     for guild in bot.guilds:
-        logging.info(f"🔁 Updating roles in guild: {guild.name}")
+        logging.debug(f"🔁 Updating roles in guild: {guild.name}")
         updated = 0
         skipped = 0
         no_activity = 0

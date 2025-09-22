@@ -5,7 +5,7 @@ import logging
 import os
 import sqlite3
 
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from typing import Optional, Tuple
 from collections import defaultdict
 
@@ -314,7 +314,7 @@ def set_setting(key, value):
 # --- Stats ---
 
 def add_frag(killer: str, victim: str, channel_id: Optional[int] = None):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     killer = killer.lower()
     victim = victim.lower()
 
@@ -342,32 +342,40 @@ def add_frag(killer: str, victim: str, channel_id: Optional[int] = None):
         update_glicko_ratings(killer, victim, event_id)
 
     except sqlite3.Error as e:
-        logging.error(f"❌ Error when adding a frag: {e}")
+        logging.exception(f"❌ Error when adding a frag: {e}")
 
 def get_top_players(n=10, days=1):
-    with sqlite3.connect(get_db_path()) as conn:
-        c = conn.cursor()
-        since = datetime.utcnow() - timedelta(days=days)
-        c.execute("""
-            SELECT killer, COUNT(*) as count FROM frags
-            WHERE timestamp >= ?
-            GROUP BY killer
-            ORDER BY count DESC
-            LIMIT ?
-        """, (since, n))
-        return c.fetchall()
+    try:
+        with sqlite3.connect(get_db_path()) as conn:
+            c = conn.cursor()
+            since = datetime.now(timezone.utc) - timedelta(days=days)
+            c.execute("""
+                SELECT killer, COUNT(*) as count FROM frags
+                WHERE timestamp >= ?
+                GROUP BY killer
+                ORDER BY count DESC
+                LIMIT ?
+            """, (since, n))
+            return c.fetchall()
+    except sqlite3.Error as e:
+        logging.exception(f"❌ Error getting top players: {e}")
+        return []
 
 # --- Linking ---
 
 def link_character(character: str, discord_id: int):
-    with sqlite3.connect(get_db_path()) as conn:
-        c = conn.cursor()
-        c.execute('''
-            INSERT INTO character_map (character, discord_id)
-            VALUES (?, ?)
-            ON CONFLICT(character) DO UPDATE SET discord_id=excluded.discord_id
-        ''', (character, discord_id))
-        conn.commit()
+    try:
+        with sqlite3.connect(get_db_path()) as conn:
+            c = conn.cursor()
+            c.execute('''
+                INSERT INTO character_map (character, discord_id)
+                VALUES (?, ?)
+                ON CONFLICT(character) DO UPDATE SET discord_id=excluded.discord_id
+            ''', (character, discord_id))
+            conn.commit()
+    except sqlite3.Error as e:
+        logging.exception(f"❌ Error linking character {character} to user {discord_id}: {e}")
+        raise
 
 def unlink_character(character: str):
     with sqlite3.connect(get_db_path()) as conn:
@@ -758,7 +766,7 @@ def update_glicko_ratings(killer: str, victim: str, event_id: Optional[int] = No
     p1.update_player([p2.getRating()], [p2.getRd()], [1])
     p2.update_player([p1.getRating()], [p1.getRd()], [0])
 
-    now_iso = datetime.utcnow().isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
     set_glicko_rating(killer, p1.getRating(), p1.getRd(), p1._vol, event_id=event_id, last_activity=now_iso)
     set_glicko_rating(victim, p2.getRating(), p2.getRd(), p2._vol, event_id=event_id, last_activity=now_iso)
 
@@ -929,7 +937,7 @@ def recalculate_glicko_recent(days: int = 30, event_id: Optional[int] = None):
         battles_by_day[day].append((killer.lower(), victim.lower()))
 
     all_players = {}
-    current = min(battles_by_day) if battles_by_day else datetime.utcnow().date()
+    current = min(battles_by_day) if battles_by_day else datetime.now(timezone.utc).date()
     end = max(battles_by_day) if battles_by_day else current
 
     while current <= end:

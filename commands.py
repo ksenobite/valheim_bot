@@ -9,7 +9,7 @@ import discord
 import logging
 
 from operator import itemgetter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from typing import Optional
 
@@ -54,32 +54,67 @@ def setup_commands(bot: commands.Bot):
     async def link(interaction: Interaction, character: str, user: discord.Member):
         if not await require_admin(interaction):
             return
+        
+        # Validate input
+        if not character or len(character) > 50:
+            await interaction.response.send_message("❌ Invalid character name.", ephemeral=True)
+            return
+            
         character = character.lower()
-        set_character_owner(character, user.id)
-        await interaction.response.send_message(f"✅ The character **{character}** is linked to {user.mention}.", ephemeral=True)
+        try:
+            set_character_owner(character, user.id)
+            await interaction.response.send_message(f"✅ The character **{character}** is linked to {user.mention}.", ephemeral=True)
+        except Exception as e:
+            logging.exception(f"❌ Failed to link character {character} to user {user.id}: {e}")
+            await interaction.response.send_message("❌ Failed to link character.", ephemeral=True)
 
     @bot.tree.command(name="unlink", description="Remove the connection between the character and the user")
     @app_commands.describe(character="Character's name")
     async def unlink(interaction: Interaction, character: str):
         if not await require_admin(interaction):
             return
+        
+        # Validate input
+        if not character or len(character) > 50:
+            await interaction.response.send_message("❌ Invalid character name.", ephemeral=True)
+            return
+            
         character = character.lower()
-        removed = remove_character_owner(character)
-        if removed:
-            await interaction.response.send_message(f"🔗 Connection to the character **{character}** has been deleted.", ephemeral=True)
-        else:
-            await interaction.response.send_message(f"❌ The character **{character}** was not attached.", ephemeral=True)
+        try:
+            removed = remove_character_owner(character)
+            if removed:
+                await interaction.response.send_message(f"🔗 Connection to the character **{character}** has been deleted.", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"❌ The character **{character}** was not attached.", ephemeral=True)
+        except Exception as e:
+            logging.exception(f"❌ Failed to unlink character {character}: {e}")
+            await interaction.response.send_message("❌ Failed to unlink character.", ephemeral=True)
 
     @bot.tree.command(name="roleset", description="Set a rank role for a win threshold")
     @describe(wins="Minimum number of wins for the role", role="Discord role to assign")
     async def roleset(interaction: Interaction, wins: int, role: discord.Role):
         if not await require_admin(interaction):
             return
+        
+        # Validate input data
         if wins < 0:
             await interaction.response.send_message("❗ Wins must be >= 0.", ephemeral=True)
             return
-        set_rank_role(wins, role.name)
-        await interaction.response.send_message(f"✅ Rank **{role.name}** set for `{wins}`+ wins.", ephemeral=True)
+            
+        if wins > 10000:
+            await interaction.response.send_message("❗ Wins must be <= 10000.", ephemeral=True)
+            return
+            
+        if not role.name or len(role.name) > 100:
+            await interaction.response.send_message("❗ Invalid role name.", ephemeral=True)
+            return
+        
+        try:
+            set_rank_role(wins, role.name)
+            await interaction.response.send_message(f"✅ Rank **{role.name}** set for `{wins}`+ wins.", ephemeral=True)
+        except Exception as e:
+            logging.exception(f"❌ Failed to set rank role: {e}")
+            await interaction.response.send_message("❌ Failed to set rank role.", ephemeral=True)
 
     @bot.tree.command(name="roleupdate", description="Force role update for all members")
     async def roleupdate(interaction: discord.Interaction):
@@ -138,6 +173,23 @@ def setup_commands(bot: commands.Bot):
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
             return
 
+        # Validate input data
+        if not target or len(target) > 100:
+            await interaction.response.send_message("❌ Invalid target. Character name too long or empty.", ephemeral=True)
+            return
+        
+        if abs(amount) > 10000:
+            await interaction.response.send_message("❌ Amount too large. Maximum ±10000 points.", ephemeral=True)
+            return
+            
+        if reason and len(reason) > 200:
+            await interaction.response.send_message("❌ Reason too long. Maximum 200 characters.", ephemeral=True)
+            return
+            
+        if event and len(event) > 50:
+            await interaction.response.send_message("❌ Event name too long. Maximum 50 characters.", ephemeral=True)
+            return
+
         await interaction.response.defer(ephemeral=True)
 
         # Resolve event_id
@@ -154,23 +206,27 @@ def setup_commands(bot: commands.Bot):
             characters = [target.lower()]
 
         # Making adjustments for each character
-        for character in characters:
-            adjust_wins(character, amount, reason, event_id=event_id)
+        try:
+            for character in characters:
+                adjust_wins(character, amount, reason, event_id=event_id)
 
-        # ✅ Response
-        char_list = "\n".join(f"- `{char}`" for char in characters)
-        
-        embed = discord.Embed(
-            title="✅ Manual Points Adjustment",
-            color=discord.Color.orange(),
-            timestamp=datetime.utcnow()
-        )
-        embed.add_field(name="Characters", value=char_list, inline=False)
-        embed.add_field(name="Amount", value=f"`{amount:+}`", inline=True)
-        embed.add_field(name="Reason", value=reason or "—", inline=True)
-        embed.set_footer(text=f"Changed by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
+            # ✅ Response
+            char_list = "\n".join(f"- `{char}`" for char in characters)
+            
+            embed = discord.Embed(
+                title="✅ Manual Points Adjustment",
+                color=discord.Color.orange(),
+                timestamp=datetime.now(timezone.utc)
+            )
+            embed.add_field(name="Characters", value=char_list, inline=False)
+            embed.add_field(name="Amount", value=f"`{amount:+}`", inline=True)
+            embed.add_field(name="Reason", value=reason or "—", inline=True)
+            embed.set_footer(text=f"Changed by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
 
-        await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            logging.exception(f"❌ Failed to adjust points for {characters}: {e}")
+            await interaction.followup.send("❌ Failed to adjust points.", ephemeral=True)
 
     @bot.tree.command(name="pointlog", description="Show manual adjustment history")
     @app_commands.describe(target="Character name or @user", event="Event name (optional)")
@@ -215,7 +271,7 @@ def setup_commands(bot: commands.Bot):
         embed = discord.Embed(
             title="📜 Points History",
             color=discord.Color.teal(),
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
         grouped = {}
         for char, delta, reason, ts in rows:
@@ -249,28 +305,41 @@ def setup_commands(bot: commands.Bot):
 
         # 🔇 Disconnect
         if leave:
-            voice_client = interaction.guild.voice_client
-            if isinstance(voice_client, discord.VoiceClient) and voice_client.is_connected():
-                await voice_client.disconnect(force=True)
-                await interaction.followup.send("🔌 Disconnected from voice channel.")
-            else:
-                await interaction.followup.send("ℹ️ I'm not connected to a voice channel.")
+            try:
+                voice_client = interaction.guild.voice_client
+                if isinstance(voice_client, discord.VoiceClient) and voice_client.is_connected():
+                    await voice_client.disconnect(force=True)
+                    await interaction.followup.send("🔌 Disconnected from voice channel.")
+                else:
+                    await interaction.followup.send("ℹ️ I'm not connected to a voice channel.")
+            except Exception as e:
+                logging.exception(f"❌ Failed to disconnect from voice channel: {e}")
+                await interaction.followup.send("❌ Failed to disconnect from voice channel.")
             return
 
         # 🔊 Connect
-        voice_state = getattr(interaction.user, "voice", None)
-        channel = getattr(voice_state, "channel", None)
+        try:
+            voice_state = getattr(interaction.user, "voice", None)
+            channel = getattr(voice_state, "channel", None)
 
-        if not channel:
-            await interaction.followup.send("⚠️ You must be in a voice channel.")
-            return
+            if not channel:
+                await interaction.followup.send("⚠️ You must be in a voice channel.")
+                return
 
-        await channel.connect()
-        await interaction.followup.send(f"🔈 Connected to **{channel.name}**")
+            await channel.connect()
+            await interaction.followup.send(f"🔈 Connected to **{channel.name}**")
 
-        # 🎵 Start playback tasks
-        asyncio.create_task(audio_queue_worker(bot, interaction.guild))
-        asyncio.create_task(start_heartbeat_loop(bot, interaction.guild))
+            # 🎵 Start playback tasks
+            asyncio.create_task(audio_queue_worker(bot, interaction.guild))
+            asyncio.create_task(start_heartbeat_loop(bot, interaction.guild))
+        except discord.Forbidden:
+            await interaction.followup.send("❌ I don't have permission to join this voice channel.")
+        except discord.ClientException as e:
+            logging.exception(f"❌ Voice connection error: {e}")
+            await interaction.followup.send("❌ Voice connection error.")
+        except Exception as e:
+            logging.exception(f"❌ Unexpected error in voice command: {e}")
+            await interaction.followup.send("❌ An unexpected error occurred.")
 
     # /style command removed (styles are fixed)
 
@@ -279,40 +348,51 @@ def setup_commands(bot: commands.Bot):
     async def reset(interaction: Interaction, backup: Optional[str] = None):
         if not await require_admin(interaction):
             return
-        os.makedirs(BACKUP_DIR, exist_ok=True)
-        if backup is None:
-            # Normal reset
-            db_path = get_db_file_path()
-            backup_file = os.path.join(BACKUP_DIR, f"frags_backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.db")
-            if os.path.exists(db_path):
-                os.rename(db_path, backup_file)
-            init_db()
-            await interaction.response.send_message(
-                "✅ Database has been reset.\n\n"
-                f"✅ Backup saved:\n {backup_file}\n\n"
-                "❗ Please set **tracking channel** and **announce channel** again!",
-                ephemeral=True
-            )
-            logging.info(f"✅ Database reset complete. Backup saved: {backup_file}")
-        else:
-            # Restore from backup
-            backup_path = os.path.join(BACKUP_DIR, backup)
-            if not os.path.exists(backup_path):
+        
+        try:
+            os.makedirs(BACKUP_DIR, exist_ok=True)
+            if backup is None:
+                # Normal reset
+                db_path = get_db_file_path()
+                backup_file = os.path.join(BACKUP_DIR, f"frags_backup_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.db")
+                if os.path.exists(db_path):
+                    os.rename(db_path, backup_file)
+                init_db()
                 await interaction.response.send_message(
-                    f"❌ Backup file `{backup}` not found.",
+                    "✅ Database has been reset.\n\n"
+                    f"✅ Backup saved:\n {backup_file}\n\n"
+                    "❗ Please set **tracking channel** and **announce channel** again!",
                     ephemeral=True
                 )
-                return
-            if os.path.exists(get_db_file_path()):
-                os.remove(get_db_file_path())
-            os.replace(backup_path, get_db_file_path())
-            init_db()
-            await interaction.response.send_message(
-                "✅ Database restored from backup\n\n"
-                "**❗ Please restart the bot manually!**",
-                ephemeral=True
-            )
-            logging.info(f"✅ Database restored from backup {backup}")
+                logging.info(f"✅ Database reset complete. Backup saved: {backup_file}")
+            else:
+                # Restore from backup
+                backup_path = os.path.join(BACKUP_DIR, backup)
+                if not os.path.exists(backup_path):
+                    await interaction.response.send_message(
+                        f"❌ Backup file `{backup}` not found.",
+                        ephemeral=True
+                    )
+                    return
+                if os.path.exists(get_db_file_path()):
+                    os.remove(get_db_file_path())
+                os.replace(backup_path, get_db_file_path())
+                init_db()
+                await interaction.response.send_message(
+                    "✅ Database restored from backup\n\n"
+                    "**❗ Please restart the bot manually!**",
+                    ephemeral=True
+                )
+                logging.info(f"✅ Database restored from backup {backup}")
+        except FileNotFoundError as e:
+            logging.exception(f"❌ File not found during reset: {e}")
+            await interaction.response.send_message("❌ File not found during reset operation.", ephemeral=True)
+        except PermissionError as e:
+            logging.exception(f"❌ Permission denied during reset: {e}")
+            await interaction.response.send_message("❌ Permission denied during reset operation.", ephemeral=True)
+        except Exception as e:
+            logging.exception(f"❌ Unexpected error during reset: {e}")
+            await interaction.response.send_message("❌ An unexpected error occurred during reset.", ephemeral=True)
 
 # --- User Commands ---
 
@@ -338,7 +418,7 @@ def setup_commands(bot: commands.Bot):
             await interaction.followup.send(f"❌ Event `{event}` not found.", ephemeral=True)
             return
 
-        since = datetime.utcnow() - timedelta(days=days)
+        since = datetime.now(timezone.utc) - timedelta(days=days)
         with sqlite3.connect(get_db_path()) as conn:
             c = conn.cursor()
             c.execute("""
@@ -466,7 +546,7 @@ def setup_commands(bot: commands.Bot):
 
         avatar_url = interaction.user.display_avatar.url if hasattr(interaction.user, "display_avatar") else None
         # filter characters by activity in this event and time window
-        since = datetime.utcnow() - timedelta(days=days)
+        since = datetime.now(timezone.utc) - timedelta(days=days)
         filtered_characters = []
         for ch in characters:
             w, l, t = get_fight_stats(ch, since, event_id)
@@ -538,7 +618,7 @@ def setup_commands(bot: commands.Bot):
             characters = [player.lower()]
 
         # filter characters by activity in this event and time window
-        since = datetime.utcnow() - timedelta(days=days)
+        since = datetime.now(timezone.utc) - timedelta(days=days)
         filtered_characters = []
         for ch in characters:
             w, l, t = get_fight_stats(ch, since, event_id)
@@ -651,6 +731,23 @@ def setup_commands(bot: commands.Bot):
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
             return
 
+        # Validate input data
+        if not target or len(target) > 100:
+            await interaction.response.send_message("❌ Invalid target. Character name too long or empty.", ephemeral=True)
+            return
+            
+        if not value or len(value) > 20:
+            await interaction.response.send_message("❌ Invalid value format. Use +N, -N, or =N.", ephemeral=True)
+            return
+            
+        if reason and len(reason) > 200:
+            await interaction.response.send_message("❌ Reason too long. Maximum 200 characters.", ephemeral=True)
+            return
+            
+        if event and len(event) > 50:
+            await interaction.response.send_message("❌ Event name too long. Maximum 50 characters.", ephemeral=True)
+            return
+
         await interaction.response.defer(ephemeral=True)
 
         event_id = get_event_id_by_name(event) if event else get_default_event_id()
@@ -719,7 +816,7 @@ def setup_commands(bot: commands.Bot):
         embed = discord.Embed(
             title=f"🔧 Glicko-2 Adjustment - Event: {event_name}",
             color=discord.Color.orange(),
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
         for char, old, new, d in changed:
             embed.add_field(name=char, value=f"{old:.1f} → {new:.1f} ({d:+.1f})", inline=False)
@@ -779,7 +876,7 @@ def setup_commands(bot: commands.Bot):
         embed = discord.Embed(
             title=f"📜 Glicko-2 Adjustment Log - Event: {event_name}",
             color=discord.Color.blurple(),
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
 
         grouped = defaultdict(list)
@@ -799,11 +896,26 @@ def setup_commands(bot: commands.Bot):
     async def mmrroleset(interaction: Interaction, threshold: int, role: discord.Role):
         if not await require_admin(interaction):
             return
+        
+        # Validate input data
         if threshold < 0:
             await interaction.response.send_message("❗ Rating must be >= 0.", ephemeral=True)
             return
-        set_mmr_role(threshold, role.name)
-        await interaction.response.send_message(f"✅ Role **{role.name}** set for `{threshold}+` Glicko rating.", ephemeral=True)
+            
+        if threshold > 10000:
+            await interaction.response.send_message("❗ Rating must be <= 5000.", ephemeral=True)
+            return
+            
+        if not role.name or len(role.name) > 100:
+            await interaction.response.send_message("❗ Invalid role name.", ephemeral=True)
+            return
+        
+        try:
+            set_mmr_role(threshold, role.name)
+            await interaction.response.send_message(f"✅ Role **{role.name}** set for `{threshold}+` Glicko rating.", ephemeral=True)
+        except Exception as e:
+            logging.exception(f"❌ Failed to set MMR role: {e}")
+            await interaction.response.send_message("❌ Failed to set MMR role.", ephemeral=True)
 
     @bot.tree.command(name="mmrroles", description="Show current Glicko-2 role configuration")
     async def mmrroles(interaction: Interaction, public: bool = False):
@@ -1068,7 +1180,7 @@ def setup_commands(bot: commands.Bot):
             await interaction.followup.send(f"❌ Event `{event}` not found.", ephemeral=True)
             return
 
-        since = datetime.utcnow() - timedelta(days=days)
+        since = datetime.now(timezone.utc) - timedelta(days=days)
         seen: set = set()
         leaderboard_data = []
 
@@ -1093,7 +1205,7 @@ def setup_commands(bot: commands.Bot):
 
                 last_active = get_last_active_day(char, event_id)
                 if last_active:
-                    days_ago = (datetime.utcnow().date() - last_active).days
+                    days_ago = (datetime.now(timezone.utc).date() - last_active).days
                     recent_days.append(days_ago)
 
             # # # ⚖️ Filtering
@@ -1401,7 +1513,7 @@ def setup_commands(bot: commands.Bot):
             title="📖 Bot Command Help",
             description="Use slash commands to manage PvP stats, MMR, killstreaks, events and roles.",
             color=discord.Color.purple(),
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
 
         # Show admin commands only if member and has permission

@@ -1,6 +1,20 @@
 #### 📄 `CHANGELOG.md`
 ```markdown
 
+## v8.1.0 — 2025-09-22
+### Added
+- 🌐 **Fully event-aware architecture**: Bot now fully supports multiple events across all features.
+- 🎯 **Event-aware ratings and roles**: Ratings and role assignments now track per event.
+- 📋 **Event names in stat headers**: Stats output (e.g., `/top`, `/topmmr`) includes event names in headers.
+- 🔒 **Data validation**: Added protection against invalid input data.
+- 🐍 **Python 3.12+ compatibility**: Fixed deprecation warnings for Python 3.12 and higher.
+- 📝 **Improved logging**: Enhanced logging for better debugging and tracking.
+### Fixed
+- 🐛 **Minor bug fixes**: Resolved small issues for improved stability.
+### Migration Notes
+- ⚠️ Users upgrading from v8.0.0+ should ensure their database reflects the new event-aware structure.
+- 📌 If issues arise, back up your `frags.db`, delete it, and let the bot recreate a fresh database on startup.
+
 ## v8.0.0 — 2025-09-18
 ### Added
 - 🏟️ **Events support**:

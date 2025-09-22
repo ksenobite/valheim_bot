@@ -8,7 +8,7 @@ import re
 import discord
 import discord.opus
 from dotenv import load_dotenv
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from discord.ext import commands
 
 from settings import *
@@ -122,7 +122,7 @@ async def on_message(message: discord.Message):
     # Determine event by channel (new helper in db.py)
     try:
         event_id = get_event_id_by_channel(message.channel.id)
-        logging.info(f"DEBUG on_message channel={message.channel.id} event_id={event_id}")
+        logging.debug(f"DEBUG on_message channel={message.channel.id} event_id={event_id}")
 
     except Exception as e:
         logging.exception(f"❌ Failed to resolve event for channel {channel.id}: {e}")
@@ -136,13 +136,18 @@ async def on_message(message: discord.Message):
 
     content = message.content.strip()
 
-    # --- [1] Standard Kill Check ---
+        # --- [1] Standard Kill Check ---
     match = re.match(r"^(.+?) killed by (.+)$", content)
     if match:
         victim_raw, killer_raw = match.groups()
         killer = killer_raw.strip().lower()
         victim = victim_raw.strip().lower()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
+        
+        # Validate input data
+        if not killer or not victim or len(killer) > 50 or len(victim) > 50:
+            logging.warning(f"❌ Invalid kill data: killer='{killer}', victim='{victim}'")
+            return
 
         ks_key_killer = (event_id, killer)
         ks_key_victim = (event_id, victim)

@@ -97,4 +97,4 @@ After build:
 ## 🎭 Authors
 - Core Development: **@ksn**
 - Coordination: **@Gurney**, **@Gloom**
-- Engineering Support: **ChatGPT**, **Grok** 🤖
+- Engineering Support: **ChatGPT**, **Grok**, **Cursor** 🤖
