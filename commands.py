@@ -1209,10 +1209,10 @@ def setup_commands(bot: commands.Bot):
                     recent_days.append(days_ago)
 
             # # # ⚖️ Filtering
-            # if total_fights < 10:
-            #     continue
-            # if total_wins > 0 and total_losses == 0:
-            #     continue
+            if total_fights < 10:
+                continue
+            if total_wins > 0 and total_losses == 0:
+                continue
 
             avg_mmr = round(sum(glicko_values) / len(glicko_values)) if glicko_values else 1500
             avg_active = min(recent_days) if recent_days else 999

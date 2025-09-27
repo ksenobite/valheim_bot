@@ -111,9 +111,9 @@ def _call_announcer(func, *args, event_id=None, **kwargs):
 
 @bot.event
 async def on_message(message: discord.Message):
-    # Ignore bot messages
-    if message.author and message.author.bot:
-        return
+    # # Ignore bot messages
+    # if message.author and message.author.bot:
+    #     return
 
     channel = message.channel
     if not channel:
