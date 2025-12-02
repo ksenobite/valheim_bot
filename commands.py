@@ -323,23 +323,47 @@ def setup_commands(bot: commands.Bot):
             channel = getattr(voice_state, "channel", None)
 
             if not channel:
-                await interaction.followup.send("⚠️ You must be in a voice channel.")
+                await interaction.followup.send("⚠️ You must be in a voice channel.", ephemeral=True)
                 return
 
-            await channel.connect()
-            await interaction.followup.send(f"🔈 Connected to **{channel.name}**")
+            current_vc = interaction.guild.voice_client
+            if current_vc:
+                if isinstance(current_vc, discord.VoiceClient) and current_vc.is_connected():
+                    await current_vc.disconnect(force=True)
+                if current_vc in interaction.client.voice_clients:
+                    interaction.client.voice_clients.remove(current_vc)
+                await interaction.guild.change_voice_state(channel=None)
+                await asyncio.sleep(2.0)
 
-            # 🎵 Start playback tasks
-            asyncio.create_task(audio_queue_worker(bot, interaction.guild))
-            asyncio.create_task(start_heartbeat_loop(bot, interaction.guild))
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    await channel.connect(timeout=30.0, reconnect=True)
+                    await interaction.followup.send(f"🔈 Connected to **{channel.name}**")
+                    
+                    # 🎵 Start playback tasks
+                    asyncio.create_task(audio_queue_worker(bot, interaction.guild))
+                    asyncio.create_task(start_heartbeat_loop(bot, interaction.guild))
+                    
+                    break
+                except discord.errors.ConnectionClosed as e:
+                    if e.code == 4006 and attempt < max_retries - 1:
+                        wait_time = (2 ** attempt) + 1  # 3s, 5s, 9s
+                        logging.warning(f"Voice connect failed (4006) on attempt {attempt+1}. Retrying in {wait_time}s...")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        raise
+                except Exception:
+                    raise
+
         except discord.Forbidden:
-            await interaction.followup.send("❌ I don't have permission to join this voice channel.")
+            await interaction.followup.send("❌ I don't have permission to join this voice channel.", ephemeral=True)
         except discord.ClientException as e:
             logging.exception(f"❌ Voice connection error: {e}")
-            await interaction.followup.send("❌ Voice connection error.")
+            await interaction.followup.send("❌ Voice connection error.", ephemeral=True)
         except Exception as e:
             logging.exception(f"❌ Unexpected error in voice command: {e}")
-            await interaction.followup.send("❌ An unexpected error occurred.")
+            await interaction.followup.send("❌ An unexpected error occurred. Try updating discord.py or resetting bot token.", ephemeral=True)
 
     # /style command removed (styles are fixed)
 

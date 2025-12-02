@@ -4,7 +4,7 @@
 import os
 import sys
 
-BOT_VERSION = "8.1.0"
+BOT_VERSION = "8.1.1"
 BACKUP_DIR = 'db_backups'
 
 def get_base_dir():

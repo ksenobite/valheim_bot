@@ -1,6 +1,12 @@
 #### 📄 `CHANGELOG.md`
 ```markdown
 
+## v8.1.1 — 2025-12-02
+### Updated
+- 🛠 **discord.py** updated to 2.6.4.
+### Fixed
+- 🐛 **/voice command**: Added session verification and safe shutdown.
+
 ## v8.1.0 — 2025-09-22
 ### Added
 - 🌐 **Fully event-aware architecture**: Bot now fully supports multiple events across all features.

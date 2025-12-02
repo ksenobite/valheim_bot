@@ -161,7 +161,10 @@ async def send_deathless_announcement(
         return
 
     # --- Fixed titles ---
-    title = DEATHLESS_TITLES.get(count)
+    if count > 9:
+        title = DEATHLESS_TITLES.get(9)
+    else:
+        title = DEATHLESS_TITLES.get(count)
     if not title:
         logging.debug(f"[DEATHLESS] No announcement for streak count={count}")
         return
@@ -250,7 +253,11 @@ async def play_deathless_sound(bot, count: int, guild: Optional[discord.Guild] =
         9: os.path.join(SOUNDS_DIR, "godlike.wav"),
     }
 
-    sound_file = deathless_sound_map.get(count)
+    if count <= 9:
+        sound_file = deathless_sound_map.get(count)
+    else:
+        sound_file = deathless_sound_map.get(9)
+        
     if not sound_file or not os.path.isfile(sound_file):
         logging.warning(f"⚠️ Deathless sound file not found: {sound_file}")
         return
