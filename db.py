@@ -82,7 +82,7 @@ def init_db():
         c.execute("""
             CREATE TABLE IF NOT EXISTS glicko_ratings (
                 character TEXT NOT NULL,
-                rating REAL DEFAULT 1500,
+                rating REAL DEFAULT 1800,
                 rd REAL DEFAULT 350,
                 vol REAL DEFAULT 0.06,
                 last_activity TEXT,
@@ -220,7 +220,7 @@ def init_db():
             c.execute("""
                 CREATE TABLE IF NOT EXISTS glicko_ratings__new (
                     character TEXT NOT NULL,
-                    rating REAL DEFAULT 1500,
+                    rating REAL DEFAULT 1800,
                     rd REAL DEFAULT 350,
                     vol REAL DEFAULT 0.06,
                     last_activity TEXT,
@@ -243,7 +243,7 @@ def init_db():
                     (character, rating, rd, vol, last_activity, event_id)
                 SELECT
                     character,
-                    COALESCE(rating, 1500),
+                    COALESCE(rating, 1800),
                     COALESCE(rd, 350),
                     COALESCE(vol, 0.06),
                     {last_expr},
@@ -650,19 +650,6 @@ def get_win_sources(character: str, event_id: Optional[int] = None) -> tuple[int
 
 # --- MMR ---
 
-def get_top_mmr(limit: int = 10) -> list[tuple[str, int]]:
-    """
-    Returns a list of top characters by MMR.
-    Each item: (character, mmr)
-    """
-    with sqlite3.connect(get_db_path()) as conn:
-        c = conn.cursor()
-        c.execute("""
-            SELECT character, mmr FROM ratings
-            ORDER BY mmr DESC LIMIT ?
-        """, (limit,))
-        return c.fetchall()
-
 def set_mmr_role(threshold: int, role_name: str):
     with sqlite3.connect(get_db_path()) as conn:
         conn.execute("""
@@ -678,28 +665,6 @@ def get_all_mmr_roles() -> list[tuple[int, str]]:
 def clear_mmr_roles():
     with sqlite3.connect(get_db_path()) as conn:
         conn.execute("DELETE FROM mmr_roles")
-
-def clear_all_mmr():
-    with sqlite3.connect(get_db_path()) as conn:
-        conn.execute("DELETE FROM ratings")
-        conn.commit()
-
-def rebuild_last_win():
-    with sqlite3.connect(get_db_path()) as conn:
-        c = conn.cursor()
-        c.execute("DELETE FROM last_win")
-
-        c.execute("""
-            SELECT killer, MAX(timestamp)
-            FROM frags
-            GROUP BY killer
-        """)
-        rows = c.fetchall()
-
-        for character, last in rows:
-            c.execute("INSERT INTO last_win (character, last_win) VALUES (?, ?)", (character, last))
-
-        conn.commit()
 
 # --- GLICKO-2 ---
 
@@ -722,7 +687,7 @@ def get_glicko_rating_extended(character: str, event_id: Optional[int] = None) -
         if row:
             return (row[0], row[1], row[2], row[3])
         # default
-        return (1500.0, 350.0, 0.06, None)
+        return (1800.0, 350.0, 0.06, None)
 
 def set_glicko_rating(
     character: str,

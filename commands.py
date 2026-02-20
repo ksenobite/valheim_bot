@@ -742,14 +742,14 @@ def setup_commands(bot: commands.Bot):
     
 # --- MMR ---        
             
-    @bot.tree.command(name="mmr", description="Admin: manually adjust Glicko-2 rating for character(s) or user")
+    @bot.tree.command(name="mmr", description="Admin: manually adjust MMR rating for character(s) or user")
     @app_commands.describe(
         target="Character name or @user",
-        value="Rating value: +50, -30, or =1500",
+        value="Rating value: +50, -30, or =1800",
         reason="Optional reason for the change",
         event="Event name (optional)"
     )
-    async def mmr(interaction: Interaction, target: str, value: str, reason: str = "Manual Glicko adjustment", event: Optional[str] = None):
+    async def mmr(interaction: Interaction, target: str, value: str, reason: str = "Manual MMR adjustment", event: Optional[str] = None):
         
         if not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
@@ -797,7 +797,7 @@ def setup_commands(bot: commands.Bot):
             try:
                 absolute = float(value[1:])
             except ValueError:
-                await interaction.followup.send("❌ Invalid absolute value. Use =1500.", ephemeral=True)
+                await interaction.followup.send("❌ Invalid absolute value. Use =1800.", ephemeral=True)
                 return
             delta = None
         else:
@@ -838,7 +838,7 @@ def setup_commands(bot: commands.Bot):
 
         # 📦 Embed
         embed = discord.Embed(
-            title=f"🔧 Glicko-2 Adjustment - Event: {event_name}",
+            title=f"🔧 MMR Adjustment - Event: {event_name}",
             color=discord.Color.orange(),
             timestamp=datetime.now(timezone.utc)
         )
@@ -850,7 +850,7 @@ def setup_commands(bot: commands.Bot):
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @bot.tree.command(name="mmrlog", description="Show Glicko-2 rating adjustment history for a character or user")
+    @bot.tree.command(name="mmrlog", description="Show MMR rating adjustment history for a character or user")
     @app_commands.describe(target="Character name or @user", event="Event name (optional)")
     async def mmrlog(interaction: Interaction, target: str, event: Optional[str] = None):
         
@@ -884,7 +884,7 @@ def setup_commands(bot: commands.Bot):
             rows = c.fetchall()
 
         if not rows:
-            await interaction.followup.send("ℹ️ No Glicko-2 rating adjustments found.", ephemeral=True)
+            await interaction.followup.send("ℹ️ No MMR rating adjustments found.", ephemeral=True)
             return
 
         # Get event name for display
@@ -898,7 +898,7 @@ def setup_commands(bot: commands.Bot):
                 pass
 
         embed = discord.Embed(
-            title=f"📜 Glicko-2 Adjustment Log - Event: {event_name}",
+            title=f"📜 MMR Adjustment Log - Event: {event_name}",
             color=discord.Color.blurple(),
             timestamp=datetime.now(timezone.utc)
         )
@@ -915,8 +915,8 @@ def setup_commands(bot: commands.Bot):
         embed.set_footer(text="Most recent 20 changes")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @bot.tree.command(name="mmrroleset", description="Set a Glicko-2 role for a threshold")
-    @app_commands.describe(threshold="Minimum Glicko rating", role="Discord role")
+    @bot.tree.command(name="mmrroleset", description="Set a MMR role for a threshold")
+    @app_commands.describe(threshold="Minimum MMR", role="Discord role")
     async def mmrroleset(interaction: Interaction, threshold: int, role: discord.Role):
         if not await require_admin(interaction):
             return
@@ -936,12 +936,12 @@ def setup_commands(bot: commands.Bot):
         
         try:
             set_mmr_role(threshold, role.name)
-            await interaction.response.send_message(f"✅ Role **{role.name}** set for `{threshold}+` Glicko rating.", ephemeral=True)
+            await interaction.response.send_message(f"✅ Role **{role.name}** set for `{threshold}+` MMR rating.", ephemeral=True)
         except Exception as e:
             logging.exception(f"❌ Failed to set MMR role: {e}")
             await interaction.response.send_message("❌ Failed to set MMR role.", ephemeral=True)
 
-    @bot.tree.command(name="mmrroles", description="Show current Glicko-2 role configuration")
+    @bot.tree.command(name="mmrroles", description="Show current MMR roles configuration")
     async def mmrroles(interaction: Interaction, public: bool = False):
         # 🛡️ Only allow public publishing by admins
         is_admin = isinstance(interaction.user, discord.Member) and interaction.user.guild_permissions.administrator
@@ -951,11 +951,11 @@ def setup_commands(bot: commands.Bot):
         
         roles = get_all_mmr_roles()
         if not roles:
-            await interaction.response.send_message("ℹ️ No Glicko roles configured.", ephemeral=True)
+            await interaction.response.send_message("ℹ️ No MMR roles configured.", ephemeral=True)
             return
         
         embed = discord.Embed(
-            title="🏅 Glicko-2 Roles",
+            title="🏅 MMR Roles",
             description="Roles based on current player rating:",
             color=discord.Color.dark_gold()
         )
@@ -964,14 +964,14 @@ def setup_commands(bot: commands.Bot):
             
         await interaction.response.send_message(embed=embed, ephemeral=not public)
 
-    @bot.tree.command(name="mmrroleclear", description="Clear all Glicko-2 role settings")
+    @bot.tree.command(name="mmrroleclear", description="Clear all MMR roles settings")
     async def mmrroleclear(interaction: Interaction):
         if not await require_admin(interaction):
             return
         clear_mmr_roles()
-        await interaction.response.send_message("🧹 All Glicko role settings have been cleared.", ephemeral=True)
+        await interaction.response.send_message("🧹 All MMR roles settings have been cleared.", ephemeral=True)
 
-    @bot.tree.command(name="mmrsync", description="🔁 Rebuild Glicko-2 MMR from frags table for specific event")
+    @bot.tree.command(name="mmrsync", description="🔁 Rebuild MMR from frags table for specific event")
     @app_commands.describe(event="Event name to rebuild")
     async def mmrsync(interaction: Interaction, event: str):
 
@@ -1067,7 +1067,7 @@ def setup_commands(bot: commands.Bot):
 
             # --- Build response embed ---
             embed = discord.Embed(
-                title="🔁 Glicko-2 MMR Sync Complete",
+                title="🔁 MMR Sync Complete",
                 color=discord.Color.green()
             )
 
@@ -1087,16 +1087,16 @@ def setup_commands(bot: commands.Bot):
                 label = f"{label} (default)"
 
             embed.description = f"Sync complete for event **{label}**.\nPlayers rebuilt: **{len(all_players)}**\n\nAll ratings recalculated from frags data"
-            embed.set_footer(text="Glicko-2 Admin Tool")
+            embed.set_footer(text="MMR Admin Tool")
 
             await interaction.followup.send(embed=embed, ephemeral=True)
-            logging.info(f"✅ Glicko-2 sync finished for event '{event_name}' ({len(all_players)} players)")
+            logging.info(f"✅ MMR sync finished for event '{event_name}' ({len(all_players)} players)")
 
         except Exception as e:
-            logging.exception("❌ Failed to run Glicko MMR sync")
+            logging.exception("❌ Failed to run MMR sync")
             await interaction.followup.send("❌ Failed to run MMR sync.", ephemeral=True)
 
-    @bot.tree.command(name="mmrclear", description="🧹 Reset Glicko-2 ratings to default values for specific event")
+    @bot.tree.command(name="mmrclear", description="🧹 Reset MMR ratings to default values for specific event")
     @app_commands.describe(event="Event name to reset")
     async def mmrclear(interaction: Interaction, event: str):
 
@@ -1130,13 +1130,13 @@ def setup_commands(bot: commands.Bot):
                 c.execute("DELETE FROM glicko_history WHERE event_id = ?", (event_id,))
 
                 # reset ratings for this event (only rating and rd)
-                c.execute("UPDATE glicko_ratings SET rating = 1500, rd = 350 WHERE event_id = ?", (event_id,))
+                c.execute("UPDATE glicko_ratings SET rating = 1800, rd = 350 WHERE event_id = ?", (event_id,))
 
                 conn.commit()
 
             # --- Build response embed ---
             embed = discord.Embed(
-                title="🧹 Glicko-2 Ratings Reset",
+                title="🧹 MMR Ratings Reset",
                 color=discord.Color.orange()
             )
 
@@ -1158,17 +1158,17 @@ def setup_commands(bot: commands.Bot):
             players_text = f"{ratings_count} player(s) reset" if ratings_count else "no players"
             hist_text = f"{hist_count} history row(s) cleared" if hist_count else "no history"
 
-            embed.description = f"Reset complete for event **{label}**.\n{players_text} — {hist_text}\n\nDefault values → `1500 ± 350`"
-            embed.set_footer(text="Glicko-2 Admin Tool")
+            embed.description = f"Reset complete for event **{label}**.\n{players_text} — {hist_text}\n\nDefault values → `1800 ± 350`"
+            embed.set_footer(text="MMR Admin Tool")
 
             await interaction.followup.send(embed=embed, ephemeral=True)
-            logging.info(f"✅ Glicko-2 reset finished for event '{event_name}' ({ratings_count} players, {hist_count} history rows)")
+            logging.info(f"✅ MMR reset finished for event '{event_name}' ({ratings_count} players, {hist_count} history rows)")
 
         except Exception as e:
-            logging.exception("❌ Failed to reset and reinitialize Glicko-2 ratings")
+            logging.exception("❌ Failed to reset and reinitialize MMR ratings")
             await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
-    @bot.tree.command(name="topmmr", description="Top players by Glicko-2 rating")
+    @bot.tree.command(name="topmmr", description="Top players by MMR rating")
     @app_commands.describe(
         count="Number of top players",
         days="Days to consider",
@@ -1285,56 +1285,26 @@ def setup_commands(bot: commands.Bot):
                 await view.send_initial(interaction)
             return
 
-        # Get event name for display
-        event_name = event if event else "arena"
-        if not event:
-            try:
-                default_event_name = get_setting("default_event")
-                if default_event_name:
-                    event_name = default_event_name
-            except Exception:
-                pass
+        # 📊 Detailed output (paginate + honor count)
+        leaderboard_data = leaderboard_data[:count]
+        embeds = await generate_topmmr_embeds(interaction, leaderboard_data, public=public, details=True, event_name=event_name)
 
-        # 📊 Detailed output
-        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-        embed = discord.Embed(
-            title=f"Top-{count} MMR in {days} day(s) - Event: {event_name}",
-            color=discord.Color.gold()
-        )
-        if leaderboard_data and leaderboard_data[0][1]:
-            embed.set_thumbnail(url=leaderboard_data[0][1])
+        if not embeds:
+            await interaction.followup.send("❌ No MMR data available.", ephemeral=not public)
+            return
 
-        for i, (name, avatar_url, chars, mmr, fights, wins, losses, winrate, recent_days) in enumerate(leaderboard_data, start=1):
-            medal = medals.get(i, "")
-            char_text = ", ".join(chars)
-            winlos = f"{wins}/{losses}"
-            winrate_str = f"{winrate:.1f}%"
+        title = f"Top-{len(leaderboard_data)} MMR in {days} day(s) - Event: {event_name}"
+        for embed in embeds:
+            embed.title = title
 
-            if recent_days <= 3:
-                activity = f"🟢 `{recent_days}d ago`"
-            elif recent_days <= 7:
-                activity = f"🟡 `{recent_days}d ago`"
-            else:
-                activity = f"🔴 `{recent_days}d ago`"
+        if len(embeds) == 1:
+            await interaction.followup.send(embed=embeds[0], ephemeral=not public)
+        else:
+            view = PaginatedStatsView(embeds, ephemeral=not public)
+            await view.send_initial(interaction)
+        return
 
-            value = (
-                f"Characters: `{char_text}`\n"
-                f"MMR: `{mmr}`\n"
-                f"Fights: `{fights}`\n"
-                f"Win/Los: `{winlos}`\n"
-                f"Winrate: `{winrate_str}`\n"
-                f"{activity}"
-            )
-
-            embed.add_field(
-                name=f"**{i}. {medal} {name.upper()}**",
-                value=value,
-                inline=False
-            )
-
-        await interaction.followup.send(embed=embed, ephemeral=not public)
-
-    @bot.tree.command(name="mmrroleupdate", description="🔁 Update Glicko-based roles for users in main event (arena)")
+    @bot.tree.command(name="mmrroleupdate", description="🔁 Update MMR roles for users in main event (arena)")
     async def mmrroleupdate(interaction: discord.Interaction):
         # 🛡️ Checking administrator rights
         if not await require_admin(interaction):
@@ -1602,10 +1572,10 @@ def setup_commands(bot: commands.Bot):
                 "🧍 `/mystats` `[days]` `[event]` `[public*]` — Show your stats\n"
                 "📊 `/stats` `[char/@user]` `[days]` `[event]` `[public*]` — Show player stats\n"
                 "🔍 `/whois` `[char/@user]` — Show who owns character\n"
-                "🎭 `/mmrroles `[public*]`` — Show MMR role configuration\n"
+                "🎭 `/mmrroles` `[public*]` — Show MMR role configuration\n"
                 "🏅 `/roles` `[public*]` — Show rank roles configuration\n"
                 "❓ `/helpme` — Show this help message\n\n"
-                "`[public*]` → only available to admins"
+                "`[public*]` - only available to admins"
             ),
             inline=False
         )
