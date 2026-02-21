@@ -9,3 +9,5 @@ build/
 *.spec
 NOTES.md
 STATE.md
+frags.db-journal
+_heap/

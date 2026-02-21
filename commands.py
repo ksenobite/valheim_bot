@@ -745,7 +745,7 @@ def setup_commands(bot: commands.Bot):
     @bot.tree.command(name="mmr", description="Admin: manually adjust MMR rating for character(s) or user")
     @app_commands.describe(
         target="Character name or @user",
-        value="Rating value: +50, -30, or =1800",
+        value="Rating value: +50, -30, or =1500",
         reason="Optional reason for the change",
         event="Event name (optional)"
     )
@@ -797,7 +797,7 @@ def setup_commands(bot: commands.Bot):
             try:
                 absolute = float(value[1:])
             except ValueError:
-                await interaction.followup.send("❌ Invalid absolute value. Use =1800.", ephemeral=True)
+                await interaction.followup.send("❌ Invalid absolute value. Use =1500.", ephemeral=True)
                 return
             delta = None
         else:
@@ -972,8 +972,11 @@ def setup_commands(bot: commands.Bot):
         await interaction.response.send_message("🧹 All MMR roles settings have been cleared.", ephemeral=True)
 
     @bot.tree.command(name="mmrsync", description="🔁 Rebuild MMR from frags table for specific event")
-    @app_commands.describe(event="Event name to rebuild")
-    async def mmrsync(interaction: Interaction, event: str):
+    @app_commands.describe(
+        event="Event name to rebuild",
+        start_date="Start date DD.MM.YYYY (optional)"
+    )
+    async def mmrsync(interaction: Interaction, event: str, start_date: Optional[str] = None):
 
         if not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("⚠️ Admin only", ephemeral=True)
@@ -999,16 +1002,47 @@ def setup_commands(bot: commands.Bot):
             # 📖 We read all the frags on the event
             with sqlite3.connect(get_db_path()) as conn:
                 c = conn.cursor()
-                c.execute("""
-                    SELECT killer, victim, timestamp 
-                    FROM frags 
-                    WHERE event_id = ? 
-                    ORDER BY timestamp ASC
-                """, (event_id,))
+                start_dt = None
+                if start_date:
+                    parsed = None
+                    for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+                        try:
+                            parsed = datetime.strptime(start_date, fmt)
+                            break
+                        except ValueError:
+                            continue
+                    if not parsed:
+                        await interaction.followup.send(
+                            "❌ Invalid start_date format. Use DD.MM.YYYY (e.g., 14.02.2026) or YYYY-MM-DD.",
+                            ephemeral=True
+                        )
+                        return
+                    start_dt = parsed.replace(tzinfo=timezone.utc)
+
+                if start_dt:
+                    c.execute("""
+                        SELECT killer, victim, timestamp 
+                        FROM frags 
+                        WHERE event_id = ? AND timestamp >= ?
+                        ORDER BY timestamp ASC
+                    """, (event_id, start_dt.isoformat()))
+                else:
+                    c.execute("""
+                        SELECT killer, victim, timestamp 
+                        FROM frags 
+                        WHERE event_id = ? 
+                        ORDER BY timestamp ASC
+                    """, (event_id,))
                 rows = c.fetchall()
 
             if not rows:
-                await interaction.followup.send(f"❌ No frags found for event '{event_name}'.", ephemeral=True)
+                if start_date:
+                    await interaction.followup.send(
+                        f"❌ No frags found for event '{event_name}' from {start_date}.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(f"❌ No frags found for event '{event_name}'.", ephemeral=True)
                 return
 
             # 🎯 Grouping the fights by day
@@ -1020,12 +1054,12 @@ def setup_commands(bot: commands.Bot):
                 battles_by_day[day].append((killer.lower(), victim.lower()))
                 all_dates.append(day)
 
-            start_date = min(all_dates)
+            first_date = min(all_dates)
             end_date = max(all_dates)
             all_players = {}
 
             # 🚀 Recalculating day by day
-            current_date = start_date
+            current_date = first_date
             while current_date <= end_date:
                 fights = battles_by_day.get(current_date, [])
 
@@ -1086,7 +1120,19 @@ def setup_commands(bot: commands.Bot):
             if default_event_id is not None and event_id == default_event_id:
                 label = f"{label} (default)"
 
-            embed.description = f"Sync complete for event **{label}**.\nPlayers rebuilt: **{len(all_players)}**\n\nAll ratings recalculated from frags data"
+            if start_date:
+                embed.description = (
+                    f"Sync complete for event **{label}**.\n"
+                    f"Players rebuilt: **{len(all_players)}**\n"
+                    f"Period: from {start_date} to {end_date.isoformat()}\n\n"
+                    "Ratings recalculated from frags data"
+                )
+            else:
+                embed.description = (
+                    f"Sync complete for event **{label}**.\n"
+                    f"Players rebuilt: **{len(all_players)}**\n\n"
+                    "All ratings recalculated from frags data"
+                )
             embed.set_footer(text="MMR Admin Tool")
 
             await interaction.followup.send(embed=embed, ephemeral=True)
@@ -1130,7 +1176,7 @@ def setup_commands(bot: commands.Bot):
                 c.execute("DELETE FROM glicko_history WHERE event_id = ?", (event_id,))
 
                 # reset ratings for this event (only rating and rd)
-                c.execute("UPDATE glicko_ratings SET rating = 1800, rd = 350 WHERE event_id = ?", (event_id,))
+                c.execute("UPDATE glicko_ratings SET rating = 1500, rd = 350 WHERE event_id = ?", (event_id,))
 
                 conn.commit()
 
@@ -1158,7 +1204,7 @@ def setup_commands(bot: commands.Bot):
             players_text = f"{ratings_count} player(s) reset" if ratings_count else "no players"
             hist_text = f"{hist_count} history row(s) cleared" if hist_count else "no history"
 
-            embed.description = f"Reset complete for event **{label}**.\n{players_text} — {hist_text}\n\nDefault values → `1800 ± 350`"
+            embed.description = f"Reset complete for event **{label}**.\n{players_text} — {hist_text}\n\nDefault values → `1500 ± 350`"
             embed.set_footer(text="MMR Admin Tool")
 
             await interaction.followup.send(embed=embed, ephemeral=True)
@@ -1545,7 +1591,7 @@ def setup_commands(bot: commands.Bot):
                     "🎯 `/mmr` `[char/@user]` `[+/-/=value]` `[reason]` `[event]` — Adjust rating\n"
                     "📃 `/mmrlog` `[char/@user]` `[event]` — Show rating history\n"
                     "🧹 `/mmrclear` `[event]` — Reset MMR to defaults\n"
-                    "🔁 `/mmrsync` `[event]` — Rebuild MMR from frags"
+                    "🔁 `/mmrsync` `[event]` `[start_date]` — Rebuild MMR from frags (start_date optional)"
                 ),
                 inline=False
             )

@@ -82,7 +82,7 @@ def init_db():
         c.execute("""
             CREATE TABLE IF NOT EXISTS glicko_ratings (
                 character TEXT NOT NULL,
-                rating REAL DEFAULT 1800,
+                rating REAL DEFAULT 1500,
                 rd REAL DEFAULT 350,
                 vol REAL DEFAULT 0.06,
                 last_activity TEXT,
@@ -220,7 +220,7 @@ def init_db():
             c.execute("""
                 CREATE TABLE IF NOT EXISTS glicko_ratings__new (
                     character TEXT NOT NULL,
-                    rating REAL DEFAULT 1800,
+                    rating REAL DEFAULT 1500,
                     rd REAL DEFAULT 350,
                     vol REAL DEFAULT 0.06,
                     last_activity TEXT,
@@ -243,7 +243,7 @@ def init_db():
                     (character, rating, rd, vol, last_activity, event_id)
                 SELECT
                     character,
-                    COALESCE(rating, 1800),
+                    COALESCE(rating, 1500),
                     COALESCE(rd, 350),
                     COALESCE(vol, 0.06),
                     {last_expr},
@@ -687,7 +687,7 @@ def get_glicko_rating_extended(character: str, event_id: Optional[int] = None) -
         if row:
             return (row[0], row[1], row[2], row[3])
         # default
-        return (1800.0, 350.0, 0.06, None)
+        return (1500.0, 350.0, 0.06, None)
 
 def set_glicko_rating(
     character: str,
