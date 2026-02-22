@@ -1373,9 +1373,17 @@ def setup_commands(bot: commands.Bot):
             await interaction.followup.send("⚠️ No MMR role thresholds configured.", ephemeral=True)
             return
 
+        inactive_role_name = next(
+            (role_name for threshold, role_name in roles_config if threshold == 0),
+            "😴 Покончил с PvP"
+        )
+        inactive_days = 30
+        inactive_cutoff = datetime.now(timezone.utc) - timedelta(days=inactive_days)
+
         updated = 0
         skipped = 0
         no_activity = 0
+        inactive = 0
 
         for member in guild.members:
             if member.bot:
@@ -1396,6 +1404,42 @@ def setup_commands(bot: commands.Bot):
 
             if not active_characters:
                 no_activity += 1
+                continue
+
+            # 💤 Check last activity for inactivity
+            last_activity_dt = None
+            for char in active_characters:
+                glicko_data = get_glicko_rating_extended(char, event_id=main_event_id)
+                if glicko_data and glicko_data[3]:
+                    try:
+                        ts = datetime.fromisoformat(glicko_data[3])
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        if (last_activity_dt is None) or (ts > last_activity_dt):
+                            last_activity_dt = ts
+                    except Exception:
+                        continue
+
+            if (last_activity_dt is None) or (last_activity_dt < inactive_cutoff):
+                # Remove all MMR roles and assign inactive role
+                roles_to_remove = [
+                    discord.utils.get(guild.roles, name=role_name)
+                    for _, role_name in roles_config
+                ]
+                inactive_role = discord.utils.get(guild.roles, name=inactive_role_name)
+                try:
+                    await member.remove_roles(*filter(None, roles_to_remove))
+                    if inactive_role and inactive_role not in member.roles:
+                        await member.add_roles(inactive_role)
+                    inactive += 1
+                    logging.info(
+                        f"💤 Marked inactive for {member.display_name}: {inactive_role_name} "
+                        f"(last_activity={last_activity_dt})"
+                    )
+                except discord.Forbidden:
+                    logging.warning(f"❌ Can't update roles for {member.display_name} (missing permissions)")
+                except Exception as e:
+                    logging.exception(f"⚠️ Unexpected error for {member.display_name}: {e}")
                 continue
 
             # 📊 Get MMR ratings only for characters active in main event
@@ -1452,6 +1496,7 @@ def setup_commands(bot: commands.Bot):
         embed.description = (
             f"**Event:** {main_event_name} (id={main_event_id})\n\n"
             f"✅ **Updated:** {updated} users\n"
+            f"💤 **Inactive:** {inactive} users (no activity {inactive_days}+ days)\n"
             f"⏭️ **Skipped:** {skipped} users (no MMR data)\n"
             f"🚫 **No activity:** {no_activity} users (not active in main event)\n\n"
             f"Only users with activity in main event received roles."
