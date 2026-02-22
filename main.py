@@ -83,6 +83,11 @@ if not TOKEN:
 killstreaks: dict = {}
 KILLSTREAK_TIMEOUT = int(get_setting("killstreak_timeout") or 15)
 
+# --- Duplicate kill filter (mod bug protection) ---
+# key: (event_id, killer, victim) -> last_seen_time (datetime)
+duplicate_kills: dict = {}
+DUPLICATE_KILL_WINDOW = 3  # seconds
+
 @bot.event
 async def on_ready():
     try:
@@ -153,6 +158,25 @@ async def on_message(message: discord.Message):
         ks_key_victim = (event_id, victim)
 
         # --- Killstreak (per-event) ---
+        # --- Duplicate kill filter (mod bug protection) ---
+        dup_key = (event_id, killer, victim)
+        last_seen = duplicate_kills.get(dup_key)
+        if last_seen:
+            delta_dup = (now - last_seen).total_seconds()
+            if delta_dup < DUPLICATE_KILL_WINDOW:
+                logging.info(
+                    f"🧹 Duplicate kill ignored: {killer} -> {victim} "
+                    f"(event_id={event_id}, {delta_dup:.2f}s)"
+                )
+                return
+        duplicate_kills[dup_key] = now
+        # Periodic cleanup to prevent unbounded growth
+        if len(duplicate_kills) > 1000:
+            cutoff = now - timedelta(seconds=60)
+            for k, ts in list(duplicate_kills.items()):
+                if ts < cutoff:
+                    duplicate_kills.pop(k, None)
+
         if ks_key_killer not in killstreaks:
             killstreaks[ks_key_killer] = {"count": 1, "last_kill_time": now}
         else:
