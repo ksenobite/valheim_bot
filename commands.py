@@ -309,6 +309,8 @@ def setup_commands(bot: commands.Bot):
                 voice_client = interaction.guild.voice_client
                 if isinstance(voice_client, discord.VoiceClient) and voice_client.is_connected():
                     await voice_client.disconnect(force=True)
+                    # Clear any queued sounds on disconnect
+                    audio_queues.pop(interaction.guild.id, None)
                     await interaction.followup.send("🔌 Disconnected from voice channel.")
                 else:
                     await interaction.followup.send("ℹ️ I'm not connected to a voice channel.")

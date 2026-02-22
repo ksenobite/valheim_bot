@@ -15,6 +15,7 @@ from db import get_event_channel
 from utils import resolve_display_data 
 
 SOUNDS_DIR = None
+MAX_QUEUE_LEN = 20
 audio_queues = defaultdict(deque)  # guild.id -> deque of file paths
 
 # --- 📦 Simple WAV audio source ---
@@ -319,8 +320,23 @@ async def audio_queue_worker(bot: discord.Client, guild: discord.Guild):
         await asyncio.sleep(1)
 
 def enqueue_sound(guild: discord.Guild, file_path: str):
+    # Avoid queueing sounds when the bot is not connected to voice
+    try:
+        voice_client = getattr(guild, "voice_client", None)
+        if not voice_client or not voice_client.is_connected():
+            logging.warning("🔇 Not connected to voice — sound not queued.")
+            return
+    except Exception:
+        logging.warning("🔇 Voice state unknown — sound not queued.")
+        return
+
     if os.path.isfile(file_path):
-        audio_queues[guild.id].append(file_path)
+        queue = audio_queues[guild.id]
+        # Cap queue size to avoid huge backlogs; drop oldest first.
+        while len(queue) >= MAX_QUEUE_LEN:
+            dropped = queue.popleft()
+            logging.info(f"🧹 Dropped queued sound due to cap: {dropped}")
+        queue.append(file_path)
         logging.info(f"🎶 Queued sound: {file_path}")
 
 async def announce_streak_break(
