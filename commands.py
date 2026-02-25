@@ -62,11 +62,39 @@ def setup_commands(bot: commands.Bot):
             
         character = character.lower()
         try:
+            await interaction.response.defer(thinking=True, ephemeral=True)
             set_character_owner(character, user.id)
-            await interaction.response.send_message(f"✅ The character **{character}** is linked to {user.mention}.", ephemeral=True)
+            await interaction.followup.send(
+                f"✅ The character **{character}** is linked to {user.mention}.",
+                ephemeral=True
+            )
+        except sqlite3.OperationalError as e:
+            logging.exception(f"❌ Failed to link character {character} to user {user.id}: {e}")
+            if "database is locked" in str(e).lower():
+                embed = discord.Embed(
+                    title="Database is locked",
+                    description=(
+                        "The database is currently opened by another program. "
+                        "Close the DB in other apps and try again."
+                    ),
+                    color=discord.Color.red()
+                )
+                await send_embed_message(interaction, embed, ephemeral=True)
+            else:
+                embed = discord.Embed(
+                    title="Database error",
+                    description="Failed to link character due to a database error.",
+                    color=discord.Color.red()
+                )
+                await send_embed_message(interaction, embed, ephemeral=True)
         except Exception as e:
             logging.exception(f"❌ Failed to link character {character} to user {user.id}: {e}")
-            await interaction.response.send_message("❌ Failed to link character.", ephemeral=True)
+            embed = discord.Embed(
+                title="Unexpected error",
+                description="Failed to link character due to an unexpected error.",
+                color=discord.Color.red()
+            )
+            await send_embed_message(interaction, embed, ephemeral=True)
 
     @bot.tree.command(name="unlink", description="Remove the connection between the character and the user")
     @app_commands.describe(character="Character's name")
@@ -81,14 +109,45 @@ def setup_commands(bot: commands.Bot):
             
         character = character.lower()
         try:
+            await interaction.response.defer(thinking=True, ephemeral=True)
             removed = remove_character_owner(character)
             if removed:
-                await interaction.response.send_message(f"🔗 Connection to the character **{character}** has been deleted.", ephemeral=True)
+                await interaction.followup.send(
+                    f"🔗 Connection to the character **{character}** has been deleted.",
+                    ephemeral=True
+                )
             else:
-                await interaction.response.send_message(f"❌ The character **{character}** was not attached.", ephemeral=True)
+                await interaction.followup.send(
+                    f"❌ The character **{character}** was not attached.",
+                    ephemeral=True
+                )
+        except sqlite3.OperationalError as e:
+            logging.exception(f"❌ Failed to unlink character {character}: {e}")
+            if "database is locked" in str(e).lower():
+                embed = discord.Embed(
+                    title="Database is locked",
+                    description=(
+                        "The database is currently opened by another program. "
+                        "Close the DB in other apps and try again."
+                    ),
+                    color=discord.Color.red()
+                )
+                await send_embed_message(interaction, embed, ephemeral=True)
+            else:
+                embed = discord.Embed(
+                    title="Database error",
+                    description="Failed to unlink character due to a database error.",
+                    color=discord.Color.red()
+                )
+                await send_embed_message(interaction, embed, ephemeral=True)
         except Exception as e:
             logging.exception(f"❌ Failed to unlink character {character}: {e}")
-            await interaction.response.send_message("❌ Failed to unlink character.", ephemeral=True)
+            embed = discord.Embed(
+                title="Unexpected error",
+                description="Failed to unlink character due to an unexpected error.",
+                color=discord.Color.red()
+            )
+            await send_embed_message(interaction, embed, ephemeral=True)
 
     @bot.tree.command(name="roleset", description="Set a rank role for a win threshold")
     @describe(wins="Minimum number of wins for the role", role="Discord role to assign")

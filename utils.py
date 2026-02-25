@@ -65,6 +65,19 @@ async def check_positive(interaction: discord.Interaction, **kwargs):
             return False
     return True
 
+async def send_embed_message(
+    interaction: discord.Interaction,
+    embed: discord.Embed,
+    ephemeral: bool = True,
+):
+    """
+    Send an embed response safely whether the interaction was already deferred or responded.
+    """
+    if interaction.response.is_done():
+        await interaction.followup.send(embed=embed, ephemeral=ephemeral)
+    else:
+        await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
+
 async def resolve_display_data(character_name: str, guild: Optional[discord.Guild]) -> dict:
     """
     Returns display data for the character.
