@@ -412,6 +412,17 @@ def setup_commands(bot: commands.Bot):
                         wait_time = (2 ** attempt) + 1  # 3s, 5s, 9s
                         logging.warning(f"Voice connect failed (4006) on attempt {attempt+1}. Retrying in {wait_time}s...")
                         await asyncio.sleep(wait_time)
+                    elif e.code == 4017:
+                        logging.error(
+                            "Voice connect failed (4017). The voice gateway rejected the connection. "
+                            "This usually means the client library is out of date and lacks required DAVE/E2EE support."
+                        )
+                        await interaction.followup.send(
+                            "❌ Voice connection rejected (4017). Update discord.py to a DAVE/E2EE-compatible version "
+                            "and reinstall voice dependencies, then try again.",
+                            ephemeral=True
+                        )
+                        break
                     else:
                         raise
                 except Exception:
